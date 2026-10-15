@@ -905,7 +905,14 @@ function matchTableRoom(text, placeIndex) {
   return findLocation(text, placeIndex);
 }
 
-function parseTable(segments, headers, placeIndex, knownCourses) {
+// 星期往前 / 往后挪几天：('Tue', -1) → 'Mon'；超出周一到周日时是 ''
+function shiftDay(day, step) {
+  const i = DAY_ORDER.indexOf(day) + step;
+  return i >= 0 && i < DAY_ORDER.length ? DAY_ORDER[i] : '';
+}
+
+// context：几张截图连着读时共用的记录，{ lastDay }（上一张截图最后一门课是星期几）
+function parseTable(segments, headers, placeIndex, knownCourses, context) {
   // 用第一行表头的位置分列：每列的边界是相邻两个表头的中点
   const cols = headers[0].cols;
   const names = Object.keys(cols).sort(function (a, b) { return cols[a] - cols[b]; });
@@ -931,10 +938,37 @@ function parseTable(segments, headers, placeIndex, knownCourses) {
       walls.push(s.y);
     }
   });
+  dayHeadings.sort(function (a, b) { return a.y - b.y; });
 
-  // 每个课号是一门课的"锚点"（在第一行表头下面，而且不是 ROOM 列里的字）
+  // 一门课是星期几。输出：{ day, guessed }
+  //   1. 上面有小标题：就是它
+  //   2. 在第一个小标题上面，而且上面没有表头：这几行是接着上一张截图的，用上一张最后的星期
+  //   3. 其他情况（截图把小标题裁掉了一半）：用下一个小标题往前推一天，算"猜的"，提醒用户检查
+  const dayFor = function (y) {
+    let heading = null;
+    dayHeadings.forEach(function (d) {
+      if (d.y < y) {
+        heading = d;
+      }
+    });
+    if (heading) {
+      return { day: heading.day, guessed: false };
+    }
+    const headerAbove = headers.some(function (h) { return h.y < y; });
+    if (!headerAbove && context.lastDay) {
+      return { day: context.lastDay, guessed: false };
+    }
+    if (dayHeadings.length > 0) {
+      const day = shiftDay(dayHeadings[0].day, -1);
+      return { day: day, guessed: day !== '' };
+    }
+    return { day: '', guessed: false };
+  };
+
+  // 每个课号是一门课的"锚点"：右边伸进 CLASS 列（课名里偶尔提到的课号不算），又在 ROOM 列左边
+  // 表头上面的行也算（接着上一张截图的那几行）
   const anchors = segments.filter(function (s) {
-    return s.y > headers[0].y && s.x0 < roomLeft && TABLE_COURSE.test(s.text);
+    return s.x1 > classLeft && s.x0 < roomLeft && TABLE_COURSE.test(s.text);
   }).sort(function (a, b) { return a.y - b.y; });
 
   const meetings = [];
@@ -954,13 +988,7 @@ function parseTable(segments, headers, placeIndex, knownCourses) {
       return s.y > top && s.y < bottom;
     });
 
-    // 星期：上面最近的小标题
-    let day = '';
-    dayHeadings.forEach(function (d) {
-      if (d.y < anchor.y) {
-        day = d.day;
-      }
-    });
+    const day = dayFor(anchor.y);
 
     const code = anchor.text.match(TABLE_COURSE);
     const course = code[1] + ' ' + code[2];
@@ -990,7 +1018,8 @@ function parseTable(segments, headers, placeIndex, knownCourses) {
       .split(/\s+/)
       .filter(function (w) { return w !== '' && !/_/.test(w) && !/^[a-z]{1,2}$/.test(w); })
       .join(' ');
-    const location = roomText ? matchTableRoom(roomText, placeIndex) : null;
+    // ROOM 列是空的或者只有 "-"：课表没给教室
+    const location = /[A-Za-z0-9]/.test(roomText) ? matchTableRoom(roomText, placeIndex) : { noRoom: true };
 
     // 课名：CLASS 列左边的字（课名可能折成两行），去掉 ">" 和零散的乱码
     const title = band.filter(function (s) { return s.x0 < classLeft || s === anchor; })
@@ -1007,31 +1036,41 @@ function parseTable(segments, headers, placeIndex, knownCourses) {
       course: course,
       section: section,
       time: time,
-      days: day ? [day] : [],
+      days: day.day ? [day.day] : [],
+      dayGuessed: day.guessed,
       location: location
     });
   });
+  // 记下这张截图最后的星期，下一张截图开头接着用
+  if (meetings.length > 0 && meetings[meetings.length - 1].days.length > 0) {
+    context.lastDay = meetings[meetings.length - 1].days[0];
+  }
   return meetings;
 }
 
 // 从文字片段里找出所有课程（截图、PDF、Word、粘贴的文字都走这里）
 // 输入：片段数组、地点搜索索引、已经知道的课号（用来认简写，比如 DS 110）
-// 输出：{ located, unlocated }
+//       context（可以不传）：几张截图连着读时共用的记录，见 parseTable
+// 输出：{ located, unlocated, guessedDays }
 //   located：  有地点的上课时段 [{ title, course, section, time, start, end, days, place, code, room }]
 //   unlocated：没地点的（线上课、课表写了 No room 等），交给用户决定
-function parseSchedule(segments, placeIndex, knownCourses) {
+//   guessedDays：哪几天是猜的（截图把星期标题裁掉了），比如 ['Mon']；没有猜就是空数组
+function parseSchedule(segments, placeIndex, knownCourses, context) {
   const rows = groupRows(segments);
   const labelRows = rows.filter(function (r) { return LABEL.test(r); }).length;
   const headers = segments.length > 0 && segments[0].y !== null ? findTableHeaders(segments) : [];
   let meetings;
   if (headers.length > 0) {
-    meetings = parseTable(segments, headers, placeIndex, knownCourses || []);
+    meetings = parseTable(segments, headers, placeIndex, knownCourses || [], context || {});
   } else if (labelRows >= 2) {
     meetings = parseLabeled(rows, placeIndex, knownCourses || []);
   } else {
     meetings = parseBlocks(segments, placeIndex, knownCourses || []);
   }
   const result = buildResult(meetings);
+  // 有的课星期是猜的（截图把星期标题裁掉了），让页面提醒用户检查
+  result.guessedDays = sortDays([].concat.apply([], meetings.filter(function (m) { return m.dayGuessed; })
+    .map(function (m) { return m.days; })));
   result.fileLocations = findAllLocations(rows, placeIndex);
   return result;
 }

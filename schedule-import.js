@@ -40,7 +40,7 @@ function fileKind(file) {
 // 读一个课表文件
 // 输入：文件、地点搜索索引、已经知道的课号、显示进度的函数（收到一句话）
 // 输出：{ located, unlocated }；读不了时抛出一个错误，错误信息可以直接给用户看
-async function readScheduleFile(file, placeIndex, knownCourses, onStatus) {
+async function readScheduleFile(file, placeIndex, knownCourses, onStatus, context) {
   const kind = fileKind(file);
 
   if (kind === 'image') {
@@ -49,7 +49,7 @@ async function readScheduleFile(file, placeIndex, knownCourses, onStatus) {
       onStatus(`Reading ${file.name}… ${Math.round(progress * 100)}%`);
     });
     console.log(`OCR lines (${file.name}):`, lines.map(function (l) { return l.text; }));
-    return parseSchedule(lines, placeIndex, knownCourses);
+    return parseSchedule(lines, placeIndex, knownCourses, context);
   }
 
   if (kind === 'ics') {

@@ -1205,13 +1205,14 @@ function undoLastChange() {
 // 读一个课表文件（截图、.ics、PDF、Word、文字都行），返回 { located, unlocated }
 // 读不了时返回 { error: '给用户看的原因' }
 // 输入：文件、这是第几个 / 一共几个（用来显示进度）
-async function readOneFile(file, number, total) {
+// context：几张截图连着读时共用的记录（schedule.js 的 parseTable 用它把上一张的星期接到下一张）
+async function readOneFile(file, number, total, context) {
   const status = document.getElementById('schedule-status');
   const prefix = total > 1 ? `(${number} of ${total}) ` : '';
   try {
     return await readScheduleFile(file, myClasses.placeIndex, knownCourses(), function (message) {
       status.textContent = prefix + message;
-    });
+    }, context);
   } catch (error) {
     console.log('Reading failed:', error);
     return { error: error.message || `Couldn't read ${file.name}.` };
@@ -1229,8 +1230,9 @@ async function handleScheduleFiles(files) {
   const results = [];
   const errors = [];
   let screenshotFailed = false; // 有没有截图一门课都没认出来（或者根本读不了）
+  const context = {}; // 按顺序读：表格截图被切成几张时，下一张开头的课接着上一张的星期
   for (let i = 0; i < files.length; i++) {
-    const result = await readOneFile(files[i], i + 1, files.length);
+    const result = await readOneFile(files[i], i + 1, files.length, context);
     const isImage = /^image\//.test(files[i].type) || /\.(png|jpe?g|heic|webp|gif)$/i.test(files[i].name);
     if (result.error) {
       errors.push(result.error);
@@ -1249,6 +1251,11 @@ async function handleScheduleFiles(files) {
   if (results.length > 0) {
     const source = files.length === 1 ? `"${files[0].name}"` : `${files.length} files`;
     offerImport(results, source);
+    // 截图把星期标题裁掉了：星期是按下一个标题往前推的，提醒用户看一眼
+    const guessed = sortDays([].concat.apply([], results.map(function (r) { return r.guessedDays || []; })));
+    if (guessed.length > 0) {
+      status.textContent = (status.textContent + ` A day heading was cut off in your screenshot, so we guessed ${guessed.join(', ')} for some classes. Check their days in My classes.`).trim();
+    }
   }
   // 截图没认出课：不只说"没找到"，而是教用户怎么把截图里的字复制出来、粘贴进来
   if (screenshotFailed) {
