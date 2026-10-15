@@ -45,7 +45,7 @@ function trackEvent(name) {
 //   课表：schedule-new、schedule-switch、schedule-delete、schedule-move、compare-open
 //   相同的课：shared-start（点了 Find classes you share）、shared-open（打开了 Shared classes）
 //   看课：class-expand（列表里点开一门课）、map-building（地图上点了上课的楼）、walk-route（点了一段课间步行）、day-pick（点了星期按钮 / All week）
-//   其他：try-sample、tab-week / tab-dorm / tab-route、route-check、install-cta / install-steps-open / pwa-install-prompt / pwa-installed（加到主屏幕）、share-open / share-native / share-copy（把课表传到另一台设备）、import-link（打开了课表链接）、break-plan-open / break-stop-add / break-best-order（课间规划，不记去哪里）、route-pick（点了常去的地方）、use-location（用了定位，不记位置）、open-maps-google / open-maps-apple（交给导航软件）、directions-to-class（点了某门课的 Directions）、dorm-open、dorm-ranking、feedback-click
+//   其他：try-sample、tab-week / tab-dorm / tab-route、route-check、ocr-tip / ocr-tip-paste（截图没认出课，提示复制文字再粘贴）、install-cta / install-steps-open / pwa-install-prompt / pwa-installed（加到主屏幕）、share-open / share-native / share-copy（把课表传到另一台设备）、import-link（打开了课表链接）、break-plan-open / break-stop-add / break-best-order（课间规划，不记去哪里）、route-pick（点了常去的地方）、use-location（用了定位，不记位置）、open-maps-google / open-maps-apple（交给导航软件）、directions-to-class（点了某门课的 Directions）、dorm-open、dorm-ranking、feedback-click
 
 
 // Feedback 按钮：有链接才显示

@@ -1223,15 +1223,23 @@ async function handleScheduleFiles(files) {
   const status = document.getElementById('schedule-status');
   removeSampleClasses();
 
+  hideOcrTip(); // 新的一次导入：上一次的提示先收起来
+
   // 先把所有文件都读完，再决定放进哪一份课表
   const results = [];
   const errors = [];
+  let screenshotFailed = false; // 有没有截图一门课都没认出来（或者根本读不了）
   for (let i = 0; i < files.length; i++) {
     const result = await readOneFile(files[i], i + 1, files.length);
+    const isImage = /^image\//.test(files[i].type) || /\.(png|jpe?g|heic|webp|gif)$/i.test(files[i].name);
     if (result.error) {
       errors.push(result.error);
+      screenshotFailed = screenshotFailed || isImage;
     } else {
       results.push(result);
+      if (isImage && result.located.length + result.unlocated.length === 0) {
+        screenshotFailed = true;
+      }
     }
   }
 
@@ -1242,8 +1250,86 @@ async function handleScheduleFiles(files) {
     const source = files.length === 1 ? `"${files[0].name}"` : `${files.length} files`;
     offerImport(results, source);
   }
+  // 截图没认出课：不只说"没找到"，而是教用户怎么把截图里的字复制出来、粘贴进来
+  if (screenshotFailed) {
+    showOcrTip();
+  }
   // 如果是从 "Find classes you share" 来的：换回自己的课表，打开 Shared classes（schedules.js）
   finishFindShared();
+}
+
+// ===== 截图没认出课时的提示 =====
+// 网站自己的识别（Tesseract）只认得写过规则的排版；手机和电脑自带的"复制图片里的文字"准得多，
+// 而且也在设备上完成、不上传。所以失败时，一步一步教用户用它，再粘贴进来
+
+// 不同设备复制图片文字的方法不一样
+function ocrTipSteps() {
+  const p = typeof devicePlatform === 'function' ? devicePlatform() : { ios: false, android: false };
+  const mac = !p.ios && !p.android && /Macintosh/.test(navigator.userAgent); // 先排除 iPhone、Android，再看是不是 Mac
+  if (p.ios) {
+    return ['Open the screenshot in <strong>Photos</strong>',
+      'Tap the <strong>text button</strong> in the corner (or touch and hold the text), then <strong>Select All</strong> → <strong>Copy</strong>',
+      'Come back and tap <strong>Paste text</strong> below'];
+  }
+  if (mac) {
+    return ['Open the screenshot in <strong>Preview</strong>',
+      'Drag across the text to select it, then press <strong>⌘C</strong>',
+      'Come back and click <strong>Paste text</strong> below'];
+  }
+  if (p.android) {
+    return ['Open the screenshot in <strong>Google Photos</strong>',
+      'Tap <strong>Lens</strong> → <strong>Text</strong> → <strong>Select all</strong> → <strong>Copy</strong>',
+      'Come back and tap <strong>Paste text</strong> below'];
+  }
+  return ['Open the screenshot in an app that can copy text from images (for example Google Lens)',
+    'Select all the text and copy it',
+    'Come back and click <strong>Paste text</strong> below'];
+}
+
+function showOcrTip() {
+  const box = document.getElementById('ocr-tip');
+  // 已经有一句 "Couldn't find any classes…" 了：这张卡片说得更清楚，那句就不要了
+  document.getElementById('schedule-status').textContent = '';
+  box.innerHTML = '<p class="ocr-tip-title">📷 We couldn’t read classes from this screenshot.</p>' +
+    '<p class="ocr-tip-lead">Easiest fix: copy the text out of it with your device, then paste it here. It takes about 20 seconds, and nothing is uploaded.</p>' +
+    '<ol class="ocr-tip-steps">' + ocrTipSteps().map(function (s) { return `<li>${s}</li>`; }).join('') + '</ol>' +
+    '<div class="ocr-tip-actions">' +
+    '<button type="button" class="primary-button" id="ocr-tip-paste">📋 Paste text</button>' +
+    '<span class="hint">or use your calendar file (.ics): the most accurate</span></div>';
+  box.hidden = false;
+  logEvent('ocr-tip');
+  box.scrollIntoView({ block: 'nearest' });
+}
+
+function hideOcrTip() {
+  const box = document.getElementById('ocr-tip');
+  box.hidden = true;
+  box.innerHTML = '';
+}
+
+// 点了 "Paste text"：打开粘贴框；浏览器允许读剪贴板的话，直接填进去并读出课（用户只要点一下）
+async function pasteFromOcrTip() {
+  logEvent('ocr-tip-paste');
+  document.getElementById('add-schedule').open = true;   // 已经有课时，"添加课表"那一块是收起的
+  document.getElementById('schedule-paste').open = true;
+  const textarea = document.getElementById('schedule-text');
+  let pasted = '';
+  try {
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      pasted = (await navigator.clipboard.readText()).trim();
+    }
+  } catch (error) {
+    // 浏览器不让读剪贴板（或者用户拒绝了）：让用户自己粘贴
+  }
+  textarea.scrollIntoView({ block: 'center' });
+  if (pasted) {
+    textarea.value = pasted;
+    hideOcrTip();
+    document.getElementById('schedule-text-button').click(); // 直接读，课就出来了
+  } else {
+    textarea.focus();
+    document.getElementById('schedule-status').textContent = 'Paste the copied text into the box, then tap Read text.';
+  }
 }
 
 // ===== 导入时：加进当前这份课表，还是另存一份 =====
@@ -1450,7 +1536,15 @@ function initMyClasses(placeIndex) {
   document.getElementById('schedule-text-button').addEventListener('click', function () {
     const text = document.getElementById('schedule-text').value;
     removeSampleClasses();
+    hideOcrTip();
     offerImport([parseSchedule(textToLines(text), placeIndex, knownCourses())], 'your text');
+  });
+
+  // 截图没认出课时的提示卡片里的 "Paste text"（卡片每次重画，所以用事件委托）
+  document.getElementById('ocr-tip').addEventListener('click', function (event) {
+    if (event.target.closest('#ocr-tip-paste')) {
+      pasteFromOcrTip();
+    }
   });
 
   // 导入时"加进当前这份 / 另存一份"的选择卡片

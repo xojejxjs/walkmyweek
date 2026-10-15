@@ -2271,3 +2271,41 @@ li.walk-expanded button.walk-row.selected {
   font-size: 13px;
   color: var(--ink);
 }
+
+/* ===== 截图没认出课时的提示（my-classes.js showOcrTip） ===== */
+/* 和"需要你确认"同一种浅蓝色：这是一个可以马上做的下一步，不是错误 */
+.ocr-tip {
+  margin: 8px 0 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--action);
+  border-radius: 8px;
+  background: var(--action-bg);
+  font-size: 14px;
+}
+
+.ocr-tip[hidden] {
+  display: none;
+}
+
+.ocr-tip-title {
+  margin: 0 0 4px;
+  font-weight: bold;
+}
+
+.ocr-tip-lead {
+  margin: 0 0 6px;
+}
+
+.ocr-tip-steps {
+  margin: 0 0 10px;
+  padding-left: 22px;
+  line-height: 1.7;
+}
+
+.ocr-tip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
