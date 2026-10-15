@@ -861,6 +861,159 @@ function buildResult(meetings) {
   };
 }
 
+// ===== 版面三：表格（Schedule Builder 的 Favorites 列表）=====
+// 有一行表头 "CLASS  START  END  ROOM …"，下面每门课占两三行：
+//   课号一行（"CDSDS 210"），下一行是 "A1-LEC (8226)"；时间在 START / END 列；
+//   地址在 ROOM 列，可能折成好几行（"765" / "Commonwealth" / "Ave LAW AUD"）
+// 星期不在表里，而是写在每一组上面的小标题（"Wednesday"、"Thursday"）
+
+// 课号可能和左边的课名粘在一起（"ScienceCDSDS 121"），所以前面不要求 \b
+const TABLE_COURSE = /([A-Z]{5})\s?(\d{3}[A-Z]?)\b/;
+const TABLE_DAY = /^[v>\s]*(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i;
+
+// 找表头：同一行里有 ROOM，还有 START 或 END
+// 输出：[{ y, h, cols: { CLASS: x, START: x, ... } }]，按从上到下排；没有表头时是空数组
+function findTableHeaders(segments) {
+  const headers = [];
+  segments.forEach(function (s) {
+    if (s.text.trim().toUpperCase() !== 'ROOM') {
+      return;
+    }
+    const cols = {};
+    segments.forEach(function (o) {
+      const word = o.text.trim().toUpperCase();
+      if (/^[A-Z]+$/.test(word) && Math.abs(o.y - s.y) < Math.max(o.h, s.h) * 0.6) {
+        cols[word] = o.x;
+      }
+    });
+    if (cols.START !== undefined || cols.END !== undefined) {
+      headers.push({ y: s.y, h: s.h, cols: cols });
+    }
+  });
+  return headers.sort(function (a, b) { return a.y - b.y; });
+}
+
+// ROOM 列里认地点。比 matchLocation 多认一种：教室不是数字，比如 "LAW AUD"（礼堂）
+function matchTableRoom(text, placeIndex) {
+  const m = text.match(/(?:^|\s)([A-Z]{2,4})\s+(AUD|[A-Z]?\d{1,4}[A-Z]?)\s*$/);
+  if (m) {
+    const place = findPlace(placeIndex, m[1], false);
+    if (place) {
+      return { place: place, code: m[1], room: m[2] };
+    }
+  }
+  return findLocation(text, placeIndex);
+}
+
+function parseTable(segments, headers, placeIndex, knownCourses) {
+  // 用第一行表头的位置分列：每列的边界是相邻两个表头的中点
+  const cols = headers[0].cols;
+  const names = Object.keys(cols).sort(function (a, b) { return cols[a] - cols[b]; });
+  const edge = function (name, side) {
+    const i = names.indexOf(name);
+    const j = i + side;
+    if (i === -1 || j < 0 || j >= names.length) {
+      return side < 0 ? -Infinity : Infinity;
+    }
+    return (cols[name] + cols[names[j]]) / 2;
+  };
+  const roomLeft = edge('ROOM', -1);
+  const roomRight = edge('ROOM', 1);
+  const classLeft = cols.CLASS !== undefined ? edge('CLASS', -1) : -Infinity;
+
+  // 表头和星期小标题是"墙"：一门课的范围不能越过它们
+  const walls = headers.map(function (h) { return h.y; });
+  const dayHeadings = [];
+  segments.forEach(function (s) {
+    const m = s.text.trim().match(TABLE_DAY);
+    if (m) {
+      dayHeadings.push({ y: s.y, day: parseDays(m[1])[0] });
+      walls.push(s.y);
+    }
+  });
+
+  // 每个课号是一门课的"锚点"（在第一行表头下面，而且不是 ROOM 列里的字）
+  const anchors = segments.filter(function (s) {
+    return s.y > headers[0].y && s.x0 < roomLeft && TABLE_COURSE.test(s.text);
+  }).sort(function (a, b) { return a.y - b.y; });
+
+  const meetings = [];
+  anchors.forEach(function (anchor, i) {
+    // 这门课的上下边界：和前后课号的中点，但不越过表头 / 星期标题
+    let top = i > 0 ? (anchors[i - 1].y + anchor.y) / 2 : -Infinity;
+    let bottom = i < anchors.length - 1 ? (anchor.y + anchors[i + 1].y) / 2 : Infinity;
+    walls.forEach(function (w) {
+      if (w < anchor.y && w > top) {
+        top = w;
+      }
+      if (w > anchor.y && w < bottom) {
+        bottom = w;
+      }
+    });
+    const band = segments.filter(function (s) {
+      return s.y > top && s.y < bottom;
+    });
+
+    // 星期：上面最近的小标题
+    let day = '';
+    dayHeadings.forEach(function (d) {
+      if (d.y < anchor.y) {
+        day = d.day;
+      }
+    });
+
+    const code = anchor.text.match(TABLE_COURSE);
+    const course = code[1] + ' ' + code[2];
+
+    // 类型：课号下面那行 "A1-LEC (8226)"
+    let section = '';
+    band.forEach(function (s) {
+      if (!section && /\b[A-Z]\d{1,2}\s*-\s*[A-Z]{3}\b/.test(s.text)) {
+        section = parseType(s.text);
+      }
+    });
+
+    // 时间：ROOM 列左边的所有时间，从左到右，第一个是开始，第二个是结束
+    const tokens = [];
+    band.filter(function (s) { return s.x0 < roomLeft; })
+      .sort(function (a, b) { return a.x0 - b.x0; })
+      .forEach(function (s) {
+        findTimeTokens(s.text).forEach(function (t) { tokens.push(t); });
+      });
+    const time = tokens.length > 0 ? resolveTimes(tokens[0], tokens[1] || null) : null;
+
+    // 地点：ROOM 列里的几行按上下拼起来；去掉右边购物车图标被认成的乱码（"w"、"h_4"）
+    const roomText = band.filter(function (s) { return s.x0 >= roomLeft && s.x0 < roomRight; })
+      .sort(function (a, b) { return a.y - b.y; })
+      .map(function (s) { return s.text; })
+      .join(' ')
+      .split(/\s+/)
+      .filter(function (w) { return w !== '' && !/_/.test(w) && !/^[a-z]{1,2}$/.test(w); })
+      .join(' ');
+    const location = roomText ? matchTableRoom(roomText, placeIndex) : null;
+
+    // 课名：CLASS 列左边的字（课名可能折成两行），去掉 ">" 和零散的乱码
+    const title = band.filter(function (s) { return s.x0 < classLeft || s === anchor; })
+      .sort(function (a, b) { return a.y - b.y || a.x0 - b.x0; })
+      .map(function (s) {
+        const t = s === anchor ? s.text.slice(0, s.text.search(TABLE_COURSE)) : s.text;
+        return t.replace(/^[>\s.]+/, '').trim();
+      })
+      .filter(function (t) { return /[A-Za-z]{3}/.test(t); })
+      .join(' ');
+
+    meetings.push({
+      title: title || course,
+      course: course,
+      section: section,
+      time: time,
+      days: day ? [day] : [],
+      location: location
+    });
+  });
+  return meetings;
+}
+
 // 从文字片段里找出所有课程（截图、PDF、Word、粘贴的文字都走这里）
 // 输入：片段数组、地点搜索索引、已经知道的课号（用来认简写，比如 DS 110）
 // 输出：{ located, unlocated }
@@ -869,9 +1022,15 @@ function buildResult(meetings) {
 function parseSchedule(segments, placeIndex, knownCourses) {
   const rows = groupRows(segments);
   const labelRows = rows.filter(function (r) { return LABEL.test(r); }).length;
-  const meetings = labelRows >= 2
-    ? parseLabeled(rows, placeIndex, knownCourses || [])
-    : parseBlocks(segments, placeIndex, knownCourses || []);
+  const headers = segments.length > 0 && segments[0].y !== null ? findTableHeaders(segments) : [];
+  let meetings;
+  if (headers.length > 0) {
+    meetings = parseTable(segments, headers, placeIndex, knownCourses || []);
+  } else if (labelRows >= 2) {
+    meetings = parseLabeled(rows, placeIndex, knownCourses || []);
+  } else {
+    meetings = parseBlocks(segments, placeIndex, knownCourses || []);
+  }
   const result = buildResult(meetings);
   result.fileLocations = findAllLocations(rows, placeIndex);
   return result;
