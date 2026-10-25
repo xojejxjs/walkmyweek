@@ -2309,3 +2309,14 @@ li.walk-expanded button.walk-row.selected {
   align-items: center;
   gap: 6px 12px;
 }
+
+/* 第二个办法：交给 AI 读。和上面的步骤用一条线隔开 */
+.ocr-tip-ai {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}

@@ -1,6 +1,7 @@
 // schedule-import.js：只负责"读各种格式的课表文件"
 // 支持：截图（OCR）、日历文件 .ics（BU 课表页面的 Download (.ics)，或 Google 日历导出）、PDF、Word (.docx)、纯文字 .txt
 // 所有文件都只在浏览器里读，不会上传到任何服务器
+// 唯一的例外：网站读不出截图、用户自己点了 "Read with AI"，那张截图才会发给后端（见文件最后）
 
 // PDF 和 Word 的读取工具比较大，只有用户真的上传这种文件时才下载
 const PDFJS_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
@@ -236,3 +237,60 @@ function parseIcs(text, placeIndex, knownCourses) {
 }
 
 console.log('schedule-import.js loaded');
+
+// ===== 用 AI 读截图（用户主动点了 "Read with AI" 才会用）=====
+
+// 把截图缩小再发：长边最多 1568 像素（Claude 看图的上限，再大也会被它缩小），转成 JPEG
+// 更小 = 上传更快、花钱更少，字还是看得清
+// 输出：base64 文字（不带 "data:image/jpeg;base64," 开头）
+function shrinkImage(file, maxSide) {
+  return new Promise(function (resolve, reject) {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = function () {
+      const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.naturalWidth * scale);
+      canvas.height = Math.round(img.naturalHeight * scale);
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff'; // 透明的地方填白色，JPEG 没有透明
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/jpeg', 0.85).split(',')[1]);
+    };
+    img.onerror = function () {
+      URL.revokeObjectURL(url);
+      reject(new Error(`Couldn't open ${file.name} as an image.`));
+    };
+    img.src = url;
+  });
+}
+
+// 把一张截图交给后端，让 AI 读
+// 输出：{ classes: [...] }（格式见 schedule.js 的 parseAiClasses）；出错时抛出一个可以直接给用户看的错误
+async function readScheduleWithAi(file) {
+  if (!BACKEND_URL) {
+    throw new Error('AI reading is not available right now.');
+  }
+  const image = await shrinkImage(file, 1568);
+  let response;
+  try {
+    // 免费的后端睡着时，第一次要几十秒才醒，所以多等一会儿
+    response = await fetch(`${BACKEND_URL}/api/read-schedule`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: image, media_type: 'image/jpeg' }),
+      signal: AbortSignal.timeout(90000)
+    });
+  } catch (error) {
+    throw new Error("Couldn't reach the AI reader. Check your connection and try again.");
+  }
+  if (response.status === 429) {
+    throw new Error("AI reading has hit today's limit. Try again tomorrow, or paste the text instead.");
+  }
+  if (!response.ok) {
+    throw new Error('The AI reader had a problem. Try again in a minute, or paste the text instead.');
+  }
+  return response.json();
+}

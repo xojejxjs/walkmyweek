@@ -10,10 +10,17 @@ const BACKEND_URL = ['localhost', '127.0.0.1'].includes(location.hostname)
   ? 'http://localhost:8001'
   : PRODUCTION_BACKEND_URL;
 
+// 后端有没有放 AI 的 key：null = 还不知道（后端还没回答），true / false = 后端说了
+// "Read with AI" 按钮只在不是 false 的时候出现，免得 key 还没放好时用户点了只看到报错
+let backendHasAi = null;
+
 // 网页一打开就悄悄"叫醒"后端：免费的托管平台闲置一段时间会让后端睡着，唤醒要几十秒
-// 用户看地图、输入地点的这段时间，后端就醒过来了。结果不用管，失败也没关系
+// 用户看地图、输入地点的这段时间，后端就醒过来了。顺便记下有没有 AI 的 key；失败也没关系
 if (BACKEND_URL) {
-  fetch(`${BACKEND_URL}/api/health`).catch(function () {});
+  fetch(`${BACKEND_URL}/api/health`)
+    .then(function (response) { return response.json(); })
+    .then(function (health) { backendHasAi = health.has_ai_key === true; })
+    .catch(function () {});
 }
 
 // 向后端要一条路线

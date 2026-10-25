@@ -1230,6 +1230,7 @@ async function handleScheduleFiles(files) {
   const results = [];
   const errors = [];
   let screenshotFailed = false; // 有没有截图一门课都没认出来（或者根本读不了）
+  const failedImages = [];      // 这些截图可以交给 AI 再读一次
   const context = {}; // 按顺序读：表格截图被切成几张时，下一张开头的课接着上一张的星期
   for (let i = 0; i < files.length; i++) {
     const result = await readOneFile(files[i], i + 1, files.length, context);
@@ -1237,10 +1238,14 @@ async function handleScheduleFiles(files) {
     if (result.error) {
       errors.push(result.error);
       screenshotFailed = screenshotFailed || isImage;
+      if (isImage) {
+        failedImages.push(files[i]);
+      }
     } else {
       results.push(result);
       if (isImage && result.located.length + result.unlocated.length === 0) {
         screenshotFailed = true;
+        failedImages.push(files[i]);
       }
     }
   }
@@ -1259,7 +1264,7 @@ async function handleScheduleFiles(files) {
   }
   // 截图没认出课：不只说"没找到"，而是教用户怎么把截图里的字复制出来、粘贴进来
   if (screenshotFailed) {
-    showOcrTip();
+    showOcrTip(failedImages);
   }
   // 如果是从 "Find classes you share" 来的：换回自己的课表，打开 Shared classes（schedules.js）
   finishFindShared();
@@ -1293,8 +1298,17 @@ function ocrTipSteps() {
     'Come back and click <strong>Paste text</strong> below'];
 }
 
-function showOcrTip() {
+// 输入：没读出来的截图（AI 按钮要用）
+function showOcrTip(images) {
   const box = document.getElementById('ocr-tip');
+  myClasses.ocrTipImages = images || [];
+  const these = myClasses.ocrTipImages.length > 1 ? 'these screenshots' : 'this screenshot';
+  // 第二个办法：交给 AI 读。只在用户点按钮时才上传，并且说清楚发给谁
+  const aiOption = BACKEND_URL && backendHasAi !== false && myClasses.ocrTipImages.length > 0
+    ? '<div class="ocr-tip-ai">' +
+      '<button type="button" class="small-button" id="ocr-tip-ai">✨ Read with AI</button>' +
+      `<span class="hint">Sends ${these} to Anthropic’s Claude AI to read. We don’t save it, and it isn’t used to train AI.</span></div>`
+    : '';
   // 已经有一句 "Couldn't find any classes…" 了：这张卡片说得更清楚，那句就不要了
   document.getElementById('schedule-status').textContent = '';
   box.innerHTML = '<p class="ocr-tip-title">📷 We couldn’t read classes from this screenshot.</p>' +
@@ -1302,7 +1316,8 @@ function showOcrTip() {
     '<ol class="ocr-tip-steps">' + ocrTipSteps().map(function (s) { return `<li>${s}</li>`; }).join('') + '</ol>' +
     '<div class="ocr-tip-actions">' +
     '<button type="button" class="primary-button" id="ocr-tip-paste">📋 Paste text</button>' +
-    '<span class="hint">or use your calendar file (.ics): the most accurate</span></div>';
+    '<span class="hint">or use your calendar file (.ics): the most accurate</span></div>' +
+    aiOption;
   box.hidden = false;
   logEvent('ocr-tip');
   box.scrollIntoView({ block: 'nearest' });
@@ -1312,6 +1327,48 @@ function hideOcrTip() {
   const box = document.getElementById('ocr-tip');
   box.hidden = true;
   box.innerHTML = '';
+  myClasses.ocrTipImages = [];
+}
+
+// 点了 "Read with AI"：把没读出来的截图一张一张交给 AI（schedule-import.js），结果和普通导入一样合并
+async function readOcrTipWithAi() {
+  const images = myClasses.ocrTipImages || [];
+  const button = document.getElementById('ocr-tip-ai');
+  const status = document.getElementById('schedule-status');
+  if (images.length === 0 || !button) {
+    return;
+  }
+  logEvent('ai-read');
+  button.disabled = true;
+  button.textContent = '✨ Reading…';
+
+  const results = [];
+  const errors = [];
+  for (let i = 0; i < images.length; i++) {
+    const prefix = images.length > 1 ? `(${i + 1} of ${images.length}) ` : '';
+    status.textContent = `${prefix}Reading with AI… The first try can take up to a minute.`;
+    try {
+      const data = await readScheduleWithAi(images[i]);
+      results.push(parseAiClasses(data.classes, myClasses.placeIndex, knownCourses()));
+    } catch (error) {
+      errors.push(error.message);
+    }
+  }
+
+  const found = results.reduce(function (n, r) { return n + r.located.length + r.unlocated.length; }, 0);
+  status.textContent = '';
+  if (found > 0) {
+    logEvent('ai-ok');
+    hideOcrTip();
+    offerImport(results, images.length === 1 ? `"${images[0].name}"` : `${images.length} screenshots`);
+    return;
+  }
+  logEvent(errors.length > 0 ? 'ai-fail' : 'ai-empty');
+  status.textContent = errors.length > 0
+    ? errors[0]
+    : "The AI couldn't find classes in this screenshot either. Try pasting the text, or use your calendar file (.ics).";
+  button.disabled = false;
+  button.textContent = '✨ Read with AI';
 }
 
 // 点了 "Paste text"：打开粘贴框；浏览器允许读剪贴板的话，直接填进去并读出课（用户只要点一下）
@@ -1547,10 +1604,13 @@ function initMyClasses(placeIndex) {
     offerImport([parseSchedule(textToLines(text), placeIndex, knownCourses())], 'your text');
   });
 
-  // 截图没认出课时的提示卡片里的 "Paste text"（卡片每次重画，所以用事件委托）
+  // 截图没认出课时的提示卡片里的 "Paste text" 和 "Read with AI"（卡片每次重画，所以用事件委托）
   document.getElementById('ocr-tip').addEventListener('click', function (event) {
     if (event.target.closest('#ocr-tip-paste')) {
       pasteFromOcrTip();
+    }
+    if (event.target.closest('#ocr-tip-ai')) {
+      readOcrTipWithAi();
     }
   });
 

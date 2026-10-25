@@ -1048,6 +1048,45 @@ function parseTable(segments, headers, placeIndex, knownCourses, context) {
   return meetings;
 }
 
+// ===== AI 读出来的课（用户点了 "Read with AI"，后端 /api/read-schedule 返回的）=====
+
+// "09:30"（24 小时制）→ 从午夜开始的分钟数；没写或格式不对时是 null
+function aiClock(text) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(text || '');
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+// 输入：后端返回的 classes 数组 [{ course, title, type, days, start, end, room, no_room }]、地点搜索索引、已经知道的课号
+// 输出：和 parseSchedule 一样的 { located, unlocated, guessedDays, fileLocations }
+// AI 只负责"看懂截图"；教室在哪栋楼，还是用网站自己的规则对（matchTableRoom），不靠 AI 猜
+function parseAiClasses(classes, placeIndex, knownCourses) {
+  const meetings = (classes || []).map(function (c) {
+    const raw = String(c.course || '').toUpperCase();
+    const found = findCourse(raw, knownCourses || []);
+    const course = found ? found.course : raw;
+    const start = aiClock(c.start);
+    const end = aiClock(c.end);
+    let location = null;
+    if (c.no_room) {
+      location = { noRoom: true };
+    } else if (c.room) {
+      location = matchTableRoom(c.room, placeIndex);
+    }
+    return {
+      title: c.title || course,
+      course: course,
+      section: parseType(c.type || ''),
+      time: start === null ? null : { start: start, end: end },
+      days: sortDays(c.days || []),
+      location: location
+    };
+  });
+  const result = buildResult(meetings);
+  result.guessedDays = [];
+  result.fileLocations = [];
+  return result;
+}
+
 // 从文字片段里找出所有课程（截图、PDF、Word、粘贴的文字都走这里）
 // 输入：片段数组、地点搜索索引、已经知道的课号（用来认简写，比如 DS 110）
 //       context（可以不传）：几张截图连着读时共用的记录，见 parseTable
