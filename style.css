@@ -100,6 +100,10 @@ main {
   width: 340px;
   padding: 16px;
   overflow-y: auto; /* 内容多了可以滚动 */
+  /* 让侧边栏里"看不见的上传框"（.visually-hidden，绝对定位）跟着侧边栏走
+     不写的话，它按整个页面来定位：课多的时候它跑到页面最下面，把页面撑高；
+     点 "Choose the .ics file" 时浏览器要把它滚进视野，整页就被推上去，下面露出一大片白 */
+  position: relative;
   border-right: 1px solid #ddd;
   box-sizing: border-box;
 }
