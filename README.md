@@ -6,7 +6,7 @@
 2. **Choose a dorm that fits your classes** — compare dorms by how long it actually takes to walk to the places you go every day.
 3. **Avoid classes too far apart** — check whether the gap between two classes is long enough to walk across campus.
 
-**Try it:** https://xojejxjs.github.io/walkmyweek/
+**Try it:** https://walkmyweek.com/
 
 *An independent student project. Not affiliated with Boston University.*
 

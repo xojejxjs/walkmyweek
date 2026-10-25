@@ -34,7 +34,9 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:8000",       # 本地开发
         "http://127.0.0.1:8000",
-        "https://xojejxjs.github.io",  # 线上网站（以后后端部署上线后用）
+        "https://walkmyweek.com",      # 线上网站（自己的域名）
+        "https://www.walkmyweek.com",
+        "https://xojejxjs.github.io",  # 旧网址：GitHub 会自动跳到新域名，留着以防万一
     ],
     allow_methods=["GET", "POST"],  # 读截图要用 POST（图片太大，放不进网址）
     allow_headers=["Content-Type"],  # 发 JSON 时浏览器会先问一句"可以带这个头吗"
