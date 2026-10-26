@@ -1226,28 +1226,32 @@ async function handleScheduleFiles(files) {
 
   hideOcrTip(); // 新的一次导入：上一次的提示先收起来
 
-  // 先把所有文件都读完，再决定放进哪一份课表
+  // 1. 先把所有文件都在浏览器里读一遍，再决定放进哪一份课表
   const results = [];
   const errors = [];
-  let screenshotFailed = false; // 有没有截图一门课都没认出来（或者根本读不了）
-  const failedImages = [];      // 这些截图可以交给 AI 再读一次
+  let failedImages = [];   // 网站自己读不出课的截图（一门课都没认出来，或者根本读不了）
   const context = {}; // 按顺序读：表格截图被切成几张时，下一张开头的课接着上一张的星期
   for (let i = 0; i < files.length; i++) {
     const result = await readOneFile(files[i], i + 1, files.length, context);
     const isImage = /^image\//.test(files[i].type) || /\.(png|jpe?g|heic|webp|gif)$/i.test(files[i].name);
-    if (result.error) {
+    if (isImage && (result.error || result.located.length + result.unlocated.length === 0)) {
+      failedImages.push(files[i]); // 截图读不出来：先不报错，下面交给 AI
+    } else if (result.error) {
       errors.push(result.error);
-      screenshotFailed = screenshotFailed || isImage;
-      if (isImage) {
-        failedImages.push(files[i]);
-      }
     } else {
       results.push(result);
-      if (isImage && result.located.length + result.unlocated.length === 0) {
-        screenshotFailed = true;
-        failedImages.push(files[i]);
-      }
     }
+  }
+
+  // 2. 读不出来的截图自动交给 AI（上传按钮下面写明了这一点）；后端没有 AI 时跳过
+  let aiTried = false;
+  let aiNote = ''; // AI 也没读出来的原因，比如"今天的次数用完了"：放进下面的提示卡里告诉用户
+  if (failedImages.length > 0 && aiAvailable()) {
+    aiTried = true;
+    const ai = await readImagesWithAi(failedImages);
+    ai.results.forEach(function (r) { results.push(r); });
+    failedImages = ai.failed;
+    aiNote = ai.errors.length > 0 ? ai.errors[0] : 'Our AI reader couldn’t find classes in it either.';
   }
 
   // 读完了："Reading …" 这类进度提示换成出错的原因；都读成功了就清空
@@ -1262,9 +1266,10 @@ async function handleScheduleFiles(files) {
       status.textContent = (status.textContent + ` A day heading was cut off in your screenshot, so we guessed ${guessed.join(', ')} for some classes. Check their days in My classes.`).trim();
     }
   }
-  // 截图没认出课：不只说"没找到"，而是教用户怎么把截图里的字复制出来、粘贴进来
-  if (screenshotFailed) {
-    showOcrTip(failedImages);
+  // 网站和 AI 都没认出课的截图：不只说"没找到"，而是教用户怎么把截图里的字复制出来、粘贴进来
+  // AI 已经试过了，提示卡里就不再放 "Read with AI" 按钮
+  if (failedImages.length > 0) {
+    showOcrTip(aiTried ? [] : failedImages, aiTried ? aiNote : '');
   }
   // 如果是从 "Find classes you share" 来的：换回自己的课表，打开 Shared classes（schedules.js）
   finishFindShared();
@@ -1298,13 +1303,13 @@ function ocrTipSteps() {
     'Come back and click <strong>Paste text</strong> below'];
 }
 
-// 输入：没读出来的截图（AI 按钮要用）
-function showOcrTip(images) {
+// 输入：没读出来的截图（AI 按钮要用）；note：额外的一句说明（比如 AI 为什么也没读出来），可以不传
+function showOcrTip(images, note) {
   const box = document.getElementById('ocr-tip');
   myClasses.ocrTipImages = images || [];
   const these = myClasses.ocrTipImages.length > 1 ? 'these screenshots' : 'this screenshot';
   // 第二个办法：交给 AI 读。只在用户点按钮时才上传，并且说清楚发给谁
-  const aiOption = BACKEND_URL && backendHasAi !== false && myClasses.ocrTipImages.length > 0
+  const aiOption = aiAvailable() && myClasses.ocrTipImages.length > 0
     ? '<div class="ocr-tip-ai">' +
       '<button type="button" class="small-button" id="ocr-tip-ai">✨ Read with AI</button>' +
       `<span class="hint">Sends ${these} to Anthropic’s Claude AI to read. We don’t save it, and it isn’t used to train AI.</span></div>`
@@ -1312,6 +1317,7 @@ function showOcrTip(images) {
   // 已经有一句 "Couldn't find any classes…" 了：这张卡片说得更清楚，那句就不要了
   document.getElementById('schedule-status').textContent = '';
   box.innerHTML = '<p class="ocr-tip-title">📷 We couldn’t read classes from this screenshot.</p>' +
+    (note ? `<p class="ocr-tip-lead">${escapeHtml(note)}</p>` : '') +
     '<p class="ocr-tip-lead">Easiest fix: copy the text out of it with your device, then paste it here. It takes about 20 seconds, and nothing is uploaded.</p>' +
     '<ol class="ocr-tip-steps">' + ocrTipSteps().map(function (s) { return `<li>${s}</li>`; }).join('') + '</ol>' +
     '<div class="ocr-tip-actions">' +
@@ -1330,7 +1336,46 @@ function hideOcrTip() {
   myClasses.ocrTipImages = [];
 }
 
-// 点了 "Read with AI"：把没读出来的截图一张一张交给 AI（schedule-import.js），结果和普通导入一样合并
+// 后端能不能用 AI 读图：有后端，而且后端没说"没有 AI 的 key"（还没回答时先当成能用）
+function aiAvailable() {
+  return Boolean(BACKEND_URL) && backendHasAi !== false;
+}
+
+// 把截图一张一张交给 AI（schedule-import.js），换成和其他读法一样的结果
+// 输出：{ results: 读出课的结果, failed: AI 也没读出课的截图, errors: 出错的原因（给用户看）}
+async function readImagesWithAi(images) {
+  const status = document.getElementById('schedule-status');
+  const results = [];
+  const failed = [];
+  const errors = [];
+  logEvent('ai-read');
+  for (let i = 0; i < images.length; i++) {
+    const prefix = images.length > 1 ? `(${i + 1} of ${images.length}) ` : '';
+    status.textContent = `${prefix}Reading ${images[i].name} with AI… The first try can take up to a minute.`;
+    try {
+      const data = await readScheduleWithAi(images[i]);
+      const result = parseAiClasses(data.classes, myClasses.placeIndex, knownCourses());
+      if (result.located.length + result.unlocated.length > 0) {
+        results.push(result);
+      } else {
+        failed.push(images[i]);
+      }
+    } catch (error) {
+      errors.push(error.message);
+      failed.push(images[i]);
+    }
+  }
+  status.textContent = '';
+  if (results.length > 0) {
+    logEvent('ai-ok');
+  }
+  if (failed.length > 0) {
+    logEvent(errors.length > 0 ? 'ai-fail' : 'ai-empty');
+  }
+  return { results: results, failed: failed, errors: errors };
+}
+
+// 点了提示卡里的 "Read with AI"（后端当时还没说有没有 AI、自动那一步跳过了时才会出现）
 async function readOcrTipWithAi() {
   const images = myClasses.ocrTipImages || [];
   const button = document.getElementById('ocr-tip-ai');
@@ -1338,34 +1383,17 @@ async function readOcrTipWithAi() {
   if (images.length === 0 || !button) {
     return;
   }
-  logEvent('ai-read');
   button.disabled = true;
   button.textContent = '✨ Reading…';
 
-  const results = [];
-  const errors = [];
-  for (let i = 0; i < images.length; i++) {
-    const prefix = images.length > 1 ? `(${i + 1} of ${images.length}) ` : '';
-    status.textContent = `${prefix}Reading with AI… The first try can take up to a minute.`;
-    try {
-      const data = await readScheduleWithAi(images[i]);
-      results.push(parseAiClasses(data.classes, myClasses.placeIndex, knownCourses()));
-    } catch (error) {
-      errors.push(error.message);
-    }
-  }
-
-  const found = results.reduce(function (n, r) { return n + r.located.length + r.unlocated.length; }, 0);
-  status.textContent = '';
-  if (found > 0) {
-    logEvent('ai-ok');
+  const ai = await readImagesWithAi(images);
+  if (ai.results.length > 0) {
     hideOcrTip();
-    offerImport(results, images.length === 1 ? `"${images[0].name}"` : `${images.length} screenshots`);
+    offerImport(ai.results, images.length === 1 ? `"${images[0].name}"` : `${images.length} screenshots`);
     return;
   }
-  logEvent(errors.length > 0 ? 'ai-fail' : 'ai-empty');
-  status.textContent = errors.length > 0
-    ? errors[0]
+  status.textContent = ai.errors.length > 0
+    ? ai.errors[0]
     : "The AI couldn't find classes in this screenshot either. Try pasting the text, or use your calendar file (.ics).";
   button.disabled = false;
   button.textContent = '✨ Read with AI';
@@ -1575,6 +1603,32 @@ async function handleClassScan(file) {
   renderMyClasses();
 }
 
+// 电脑上把文件拖到上传框里：和点按钮选文件一样处理
+function initUploadDrop() {
+  const drop = document.getElementById('upload-drop');
+  ['dragenter', 'dragover'].forEach(function (type) {
+    drop.addEventListener(type, function (event) {
+      event.preventDefault(); // 不写的话，浏览器会直接打开这个文件，而不是交给网页
+      drop.classList.add('dragging');
+    });
+  });
+  ['dragleave', 'drop'].forEach(function (type) {
+    drop.addEventListener(type, function () {
+      drop.classList.remove('dragging');
+    });
+  });
+  drop.addEventListener('drop', async function (event) {
+    event.preventDefault();
+    const files = Array.from(event.dataTransfer.files || []);
+    if (files.length === 0) {
+      return;
+    }
+    // 统计和点按钮选文件一样：只记文件的种类，不记文件名和内容（analytics.js）
+    files.forEach(function (file) { logEvent('import-' + fileKind(file)); });
+    await handleScheduleFiles(files);
+  });
+}
+
 // app.js 在地点索引建好之后调用：把事件都接上
 function initMyClasses(placeIndex) {
   myClasses.placeIndex = placeIndex;
@@ -1587,6 +1641,8 @@ function initMyClasses(placeIndex) {
     }
     event.target.value = '';
   });
+
+  initUploadDrop();
 
   // 针对某一门课再传一张截图
   document.getElementById('class-scan-file').addEventListener('change', async function (event) {

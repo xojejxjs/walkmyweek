@@ -1370,25 +1370,66 @@ button.walk-row.selected {
   border: 0;
 }
 
-.ics-guide {
-  margin: 8px 0 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--action);
-  border-radius: 8px;
+/* 唯一的上传入口：一个大的虚线框，点了打开上传框，电脑上也可以把文件拖进来 */
+#sidebar label.upload-drop {
+  display: block;
+  margin: 8px 0 6px;
+  padding: 16px 12px;
+  border: 2px dashed var(--action);
+  border-radius: 10px;
   background: var(--action-bg);
+  text-align: center;
+  cursor: pointer;
 }
 
-.ics-guide-title {
-  margin: 0 0 6px;
-  font-size: 14px;
+#sidebar label.upload-drop:hover,
+#sidebar label.upload-drop.dragging {
+  border-style: solid;
+  background: #dce8fb;
+}
+
+.upload-title {
+  display: block;
+  font-size: 16px;
   font-weight: bold;
+  color: var(--action);
+}
+
+.upload-sub {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: normal;
   color: var(--ink);
 }
 
-.ics-steps {
-  margin: 0;
-  padding-left: 20px;
+/* "or drop them here"：手机上不能拖文件，不显示 */
+@media (hover: none) {
+  .drop-only {
+    display: none;
+  }
+}
+
+/* 用键盘 Tab 到藏起来的上传框时，大按钮显示焦点框 */
+#schedule-file:focus-visible + .upload-drop {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* 怎么拿到 .ics：平时收起来 */
+.ics-help {
+  margin: 0 0 4px;
   font-size: 13px;
+}
+
+.ics-help summary {
+  color: var(--action);
+  cursor: pointer;
+}
+
+.ics-steps {
+  margin: 6px 0 0;
+  padding-left: 20px;
   line-height: 1.6;
 }
 
@@ -1396,7 +1437,7 @@ button.walk-row.selected {
   margin-bottom: 4px;
 }
 
-/* 第 2 步里画一个和 BU 网站上长得差不多的按钮，用户到了 MyBU 一眼认得出要点哪个 */
+/* 第 2 步里画一个和学校网站上长得差不多的按钮，用户到了学生系统一眼认得出要点哪个 */
 .bu-button {
   display: inline-block;
   padding: 0 8px;
@@ -1409,41 +1450,8 @@ button.walk-row.selected {
   white-space: nowrap;
 }
 
-/* 第 3 步的大按钮（其实是 label，点了打开上传框） */
-#sidebar label.file-button {
-  display: inline-block;
-  margin: 4px 0 0;
-  padding: 8px 14px;
-  border-radius: 6px;
-  background: var(--action);
-  color: white;
-  font-size: 14px;
-  font-weight: bold;
-  cursor: pointer;
-}
-
-#sidebar label.file-button:hover {
-  background: #0f4799;
-}
-
-/* 用键盘 Tab 到藏起来的上传框时，大按钮显示焦点框 */
-#schedule-file:focus-visible + .ics-guide .file-button {
-  outline: 3px solid var(--ink);
-  outline-offset: 2px;
-}
-
-/* "choose files"：看起来像链接 */
-#sidebar label.file-link {
-  display: inline;
-  margin: 0;
-  font-size: inherit;
-  color: var(--action);
-  text-decoration: underline;
-  cursor: pointer;
-}
-
-.other-files {
-  margin-bottom: 2px;
+.upload-privacy {
+  margin-top: 4px;
 }
 
 /* 侧边栏里的 "#sidebar input"（带 id，优先级高）会把宽度改成 100%，这里再写一次，保证真的藏起来 */
