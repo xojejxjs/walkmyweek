@@ -45,7 +45,8 @@ function trackEvent(name) {
 //   课表：schedule-new、schedule-switch、schedule-delete、schedule-move、compare-open
 //   相同的课：shared-start（点了 Find classes you share）、shared-open（打开了 Shared classes）
 //   看课：class-expand（列表里点开一门课）、map-building（地图上点了上课的楼）、walk-route（点了一段课间步行）、day-pick（点了星期按钮 / All week）
-//   其他：try-sample、tab-week / tab-dorm / tab-route、route-check、ocr-tip / ocr-tip-paste（截图没认出课，提示复制文字再粘贴）、ai-read / ai-ok / ai-empty / ai-fail（点了 Read with AI、结果怎样，不记截图内容）、install-cta / install-steps-open / pwa-install-prompt / pwa-installed（加到主屏幕）、share-open / share-native / share-copy（把课表传到另一台设备）、import-link（打开了课表链接）、break-plan-open / break-stop-add / break-best-order（课间规划，不记去哪里）、route-pick（点了常去的地方）、use-location（用了定位，不记位置）、open-maps-google / open-maps-apple（交给导航软件）、directions-to-class（点了某门课的 Directions）、dorm-open、dorm-ranking、feedback-click
+//   来源：ref-xhs / ref-reddit / ref-wechat / ref-linkedin / ref-flyer …（链接带 ?ref= 时记一次，见 trackReferral）
+//   其他：try-sample、tab-week / tab-dorm / tab-route、route-check、ocr-tip / ocr-tip-paste（截图没认出课，提示复制文字再粘贴）、ai-read / ai-ok / ai-empty / ai-fail（截图交给 AI 读、结果怎样，不记截图内容）、install-cta / install-steps-open / pwa-install-prompt / pwa-installed（加到主屏幕）、share-open / share-native / share-copy（把课表传到另一台设备）、import-link（打开了课表链接）、break-plan-open / break-stop-add / break-best-order（课间规划，不记去哪里）、route-pick（点了常去的地方）、use-location（用了定位，不记位置）、open-maps-google / open-maps-apple（交给导航软件）、directions-to-class（点了某门课的 Directions）、dorm-open、dorm-ranking、feedback-click
 
 
 // Feedback 按钮：有链接才显示
@@ -121,7 +122,26 @@ function initEventTracking() {
   });
 }
 
+// 从哪个渠道来的：发到不同地方的链接带不同的标记，比如 walkmyweek.com/?ref=xhs（小红书）、?ref=reddit
+// 记一次 "ref-xhs" 这样的事件，然后把 ?ref= 从地址栏去掉：
+// 这样用户再把网址分享出去时，不会把别人也算成同一个渠道；网址也更干净
+function trackReferral() {
+  const params = new URLSearchParams(location.search);
+  const ref = (params.get('ref') || '').toLowerCase();
+  if (!ref) {
+    return;
+  }
+  // 只认短的字母、数字、横线：别人乱改网址时，不会把奇怪的文字发进统计
+  if (/^[a-z0-9-]{1,20}$/.test(ref)) {
+    trackEvent('ref-' + ref);
+  }
+  params.delete('ref');
+  const query = params.toString();
+  history.replaceState(null, '', location.pathname + (query ? '?' + query : '') + location.hash);
+}
+
 initFeedbackLink();
 initEventTracking();
+trackReferral();
 
 console.log('analytics.js loaded');
