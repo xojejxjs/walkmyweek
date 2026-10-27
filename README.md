@@ -27,9 +27,11 @@
 - **Any address** — type a street address near BU (e.g. an off-campus apartment) and it is found on the map with OpenStreetMap Nominatim. Drag the pin if the spot is slightly off.
 - **Class locations** — type a room from your schedule, like `CAS 211` or `PHO 206`, using official BU building codes.
 - **My classes** — add your schedule as screenshots, the BU calendar file (.ics), PDF, Word (.docx) or text. Classes are matched by course number first, then by type (lecture, discussion…) and time; days and times are standardised (Mon, Wed, Fri · 9:05 AM – 9:55 AM). Each building on the map shows how many of your classes meet there. Locations guessed from the course number always need your confirmation.
+- **Check before adding** — every import opens a review dialog: a mini week calendar of what was read, with likely mistakes flagged first (missing day or time, weekend classes, clashes, misread names, two spellings of one course). Fix them in place, remove rows (restorable), or add a class time that was missed. If the file has no rooms, a second step lets you pick the building for each course with one tap.
+- **Edit anything** — name, course number, type, days and times of any class, or add a class by hand. Removed classes go to "Removed & skipped" and can be restored.
 - **Plan this break** — tap a walk with spare time and add the places you want to go in between (lunch, the library, your dorm, or any shop or address on the map). For each stop you see when you'll arrive, when you must leave and how long you can stay, plus whether you'll still make your next class. Reorder or remove stops, get a "best order" suggestion, and open the whole route in Google Maps.
 - **Send to another device** — move your schedule from laptop to phone (scan a QR code) or phone to laptop (AirDrop, Messages, WeChat, email), or send it to a friend for Shared classes. The schedule is packed into the part of the link after `#`, which browsers never send to any server, so nothing is uploaded.
-- **Dorm ranking** — choose a building and see every dorm ranked by walking time to it.
+- **Dorm ranking** — choose a building and see every dorm ranked by walking time to it, or rank by **your whole week**: walking from the dorm to your first class and back from your last class, every class day. If some classes have no room yet, the ranking says how many courses it is based on.
 - Works on phones as well as laptops. **Add it to your Home Screen** and it opens like an app; it also **works offline** (your classes and walking times are saved on the device; the map background and address search need internet). The service worker always fetches the newest version when online.
 
 ## How walking times are calculated
@@ -88,6 +90,12 @@ python3 -m http.server 8000
 ```
 
 Then open http://localhost:8000. (Opening `index.html` directly won't work, because browsers block `fetch` from reading local files.)
+
+After changing how schedules are read (`schedule.js`, `schedule-import.js`), run the reader tests. They need only Node, no browser:
+
+```bash
+node tools/test-parser.js
+```
 
 After adding places to `data.json` or changing coordinates, regenerate the building outlines:
 

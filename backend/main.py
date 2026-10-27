@@ -78,7 +78,10 @@ route_cache = {}
 # 函数返回的字典，FastAPI 会自动转成 JSON 发回给浏览器
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "has_api_key": ORS_API_KEY is not None, "has_ai_key": AI_API_KEY is not None}
+    # features：这一版后端会做的事。部署以后看这里，就知道 Render 上跑的是不是新版
+    #   dates：表头只有日期时，AI 返回 "MM-DD"，由网页推算星期
+    return {"status": "ok", "has_api_key": ORS_API_KEY is not None, "has_ai_key": AI_API_KEY is not None,
+            "features": ["dates"]}
 
 
 # 计算两点之间的真实步行路线
@@ -156,12 +159,16 @@ Rules:
 - title: the course name if shown, otherwise "".
 - type: LEC, DIS, LAB, SEM, IND or similar if shown (for example "A1-LEC" means LEC), otherwise "".
 - days: from Mon, Tue, Wed, Thu, Fri, Sat, Sun. In tables grouped under day headings, use the heading above the row.
+  In a calendar grid, use the weekday shown on the column heading. Look carefully at which column each block sits in.
+  If the headings show only dates (like "Sep 7") and no weekday names, leave days empty and fill dates instead.
   If a heading is cut off and you cannot tell the day, use an empty list.
+- dates: only when the column headings show dates without weekday names: every date this meeting appears on,
+  as "MM-DD" (for example ["09-07", "09-09"]). Otherwise an empty list.
 - start / end: 24-hour "HH:MM". Use "" if not shown.
 - room: the location text as shown, including the street address and the building code and room,
   like "685-725 Comm Ave CAS B12" or "CDS 164". Use "" if not shown.
 - no_room: true when the schedule says there is no room (for example "-", "TBA", "No room assigned").
-- Ignore icons, buttons, instructor names, dates and anything that is not a class meeting.
+- Ignore icons, buttons, instructor names and anything that is not a class meeting.
 - If the image is not a class schedule, report an empty list."""
 
 # 用"工具"让 Claude 按固定格式回答：它只能填这张表，不会多说别的话
@@ -180,6 +187,7 @@ AI_TOOL = {
                         "title": {"type": "string"},
                         "type": {"type": "string"},
                         "days": {"type": "array", "items": {"type": "string", "enum": DAY_NAMES}},
+                        "dates": {"type": "array", "items": {"type": "string"}},
                         "start": {"type": "string"},
                         "end": {"type": "string"},
                         "room": {"type": "string"},
@@ -250,6 +258,9 @@ def clean_classes(raw):
             "title": clean_text(item.get("title"), 80),
             "type": clean_text(item.get("type"), 10),
             "days": [d for d in DAY_NAMES if d in days],
+            # 表头只有日期时的 "MM-DD"：星期由网页按日期推算（AI 不知道年份，算星期容易错）
+            "dates": [d for d in (item.get("dates") if isinstance(item.get("dates"), list) else [])
+                      if isinstance(d, str) and re.fullmatch(r"\d{2}-\d{2}", d)][:7],
             "start": clean_time(item.get("start")),
             "end": clean_time(item.get("end")),
             "room": clean_text(item.get("room"), 80),

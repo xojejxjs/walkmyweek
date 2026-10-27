@@ -21,8 +21,8 @@ function findClassWalks(items) {
   const checkable = [];
   const unchecked = [];
   items.forEach(function (c) {
-    if (c.status === 'skipped') {
-      return; // 用户自己跳过的课，不算，也不提
+    if (c.status === 'skipped' || c.draft) {
+      return; // 用户自己跳过的课、正在手动添加还没保存的课，不算，也不提
     }
     if (c.status === 'confirmed' && c.place && c.start != null && c.end != null && c.days.length > 0) {
       checkable.push(c);
@@ -182,8 +182,8 @@ function renderDayPlan(result) {
   // 那天有课但还不知道在哪：说出来，不然用户会以为那天就这几节
   const missing = result.unchecked.filter(function (c) { return c.days && c.days.includes(day); });
   if (missing.length > 0) {
-    const names = missing.map(function (c) { return `${keepOriginal(escapeHtml(c.title))} (${uncheckedReason(c)})`; });
-    html += `<p class="hint walk-unchecked">Not checked yet: ${names.join(', ')}.</p>`;
+    html += `<p class="hint walk-unchecked">${uncheckedSummary(missing)} to be included.
+      <button type="button" class="link-button" data-action="fix-unchecked">Add</button></p>`;
   }
   return html;
 }
@@ -350,7 +350,8 @@ function renderClassWalks() {
       html += '<p class="hint">No back-to-back classes on the same day, so there are no walks to check.</p>';
     }
   } else {
-    html += '<p class="hint">Confirm where your classes are above, then the walks between them show up here.</p>';
+    // 一门课都还没法检查：不列一长串课名，只说缺什么、给一个按钮去补
+    html += renderUncheckedEmpty(result.unchecked);
   }
 
   // 1. 要注意的：冲突、🔴、🟡、🟢（已经按这个顺序排好）
@@ -370,12 +371,10 @@ function renderClassWalks() {
     html += `<p class="hint walk-single">${result.singleDays.join(', ')}: only 1 class that day, so nothing to walk.</p>`;
   }
 
-  // 4. 没法检查的课：说出来，不然用户会以为"没显示 = 没问题"
-  if (result.unchecked.length > 0) {
-    const names = result.unchecked.map(function (c) {
-      return `${keepOriginal(escapeHtml(c.title))} (${uncheckedReason(c)})`;
-    });
-    html += `<p class="hint walk-unchecked">Not checked yet: ${names.join(', ')}.</p>`;
+  // 4. 有一部分课还没法检查：一行说清楚有几门、缺什么，不然用户会以为"没显示 = 没问题"
+  if (result.unchecked.length > 0 && result.checked.length > 0) {
+    html += `<p class="hint walk-unchecked">${uncheckedSummary(result.unchecked)} to be included.
+      <button type="button" class="link-button" data-action="fix-unchecked">Add</button></p>`;
   }
 
   box.innerHTML = html;
@@ -432,6 +431,15 @@ function renderWalkRow(walk) {
 
 // 点了某一行：Directions 里填好这两节课和课间分钟数，地图上画出路线，然后滚到结果
 function handleWalkClick(event) {
+  if (event.target.closest('[data-action="fix-unchecked"]')) {
+    // 缺教室：一次补完；只缺时间或星期：打开那门课改
+    if (coursesNeedingRooms().length > 0) {
+      openRoomsDialog();
+    } else {
+      openFirstUnchecked();
+    }
+    return;
+  }
   // 星期按钮、"← Back to all week"：data-day 是空的就是 All week
   const dayButton = event.target.closest('button[data-day]');
   if (dayButton) {
@@ -536,6 +544,42 @@ function formatBreak(minutes) {
     return `${m} min`;
   }
   return m === 0 ? `${h} hr` : `${h} hr ${m} min`;
+}
+
+// 没法检查的课 → 很短的一句："3 courses need a room"、"2 courses need a room or time"
+// 同一门课的几个时段（LEC / DIS、每周几次）只算一门；不列课名（下面 My classes 里都有）
+function uncheckedSummary(unchecked) {
+  const courses = new Set(unchecked.map(function (c) { return (c.course || c.title).toUpperCase(); })).size;
+  const allNoRoom = unchecked.every(function (c) { return uncheckedReason(c) === 'no location yet'; });
+  const what = allNoRoom ? 'a room' : 'a room or time';
+  return `${courses} ${courses === 1 ? 'course needs' : 'courses need'} ${what}`;
+}
+
+// 一门课都还不能检查时：一行字 + 一个按钮，用户不用读就知道下一步
+function renderUncheckedEmpty(unchecked) {
+  const allNoRoom = unchecked.every(function (c) { return uncheckedReason(c) === 'no location yet'; });
+  return `<div class="walks-empty">
+      <span class="walks-empty-title">📍 ${allNoRoom ? 'Add rooms to see your walks' : 'A few details missing'}</span>
+      <button type="button" class="small-button" data-action="fix-unchecked">${allNoRoom ? 'Add rooms' : 'Fix'}</button>
+    </div>`;
+}
+
+// 点了"Add rooms / Fix"：打开第一门还没法检查的课，滚过去
+function openFirstUnchecked() {
+  const result = findClassWalks(myClasses.items);
+  const first = result.unchecked.slice().sort(compareMeetings)[0];
+  if (!first) {
+    return;
+  }
+  myClasses.openId = first.id;
+  renderMyClasses();
+  const card = document.querySelector(`#schedule-list [data-id="${first.id}"]`);
+  if (card) {
+    if (typeof updateConfirmButton === 'function' && card.classList.contains('editing')) {
+      updateConfirmButton(card);
+    }
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
 }
 
 // 为什么这门课没法检查

@@ -197,7 +197,9 @@ function saveMyClasses() {
         activeId: myClasses.activeId,
         schedules: myClasses.schedules.map(function (schedule) {
           // breakPlans：课间规划（gap-planner.js），key 是那一对课
-          return { id: schedule.id, name: schedule.name, kind: schedule.kind || null, items: schedule.items.map(classToSaved), breakPlans: schedule.breakPlans || undefined };
+          // 正在手动添加、还没保存的课（draft）不存
+          const items = schedule.items.filter(function (c) { return !c.draft; });
+          return { id: schedule.id, name: schedule.name, kind: schedule.kind || null, items: items.map(classToSaved), breakPlans: schedule.breakPlans || undefined };
         })
       }));
     }
@@ -446,8 +448,24 @@ function removeSampleClasses() {
 
 // ===== 状态变化 =====
 
+// 读文件的结果这类"告诉你一声"的话：过一会儿自动消失，不然几步以后它说的已经不对了
+// （比如"6 still need a room"，补完 4 门以后还挂在那里）
+let statusTimer = null;
+function flashStatus(text, ms) {
+  const status = document.getElementById('schedule-status');
+  status.textContent = text;
+  clearTimeout(statusTimer);
+  statusTimer = setTimeout(function () {
+    if (status.textContent === text) {
+      status.textContent = '';
+    }
+  }, ms || 10000);
+}
+
 // 记下现在的样子，以便 Undo；然后执行修改、重新显示、弹出提示
+// 用户动手改了课表：之前那句读文件的结果多半已经过时，清掉（这一步自己有 Undo 提示）
 function changeWithUndo(message, change) {
+  document.getElementById('schedule-status').textContent = '';
   myClasses.undo = myClasses.items.map(function (item) {
     return Object.assign({}, item, { days: item.days.slice() });
   });
@@ -508,10 +526,6 @@ function addParsedSchedule(result) {
   });
 
   renderMyClasses();
-  if (incoming.length === 0) {
-    document.getElementById('schedule-status').textContent =
-      "Couldn't find any classes. Try a clearer screenshot, or paste the text instead.";
-  }
   return filledIn;
 }
 
@@ -531,6 +545,9 @@ function renderMyClasses() {
 
   // 课间步行分析（my-week.js）也跟着重新算
   renderClassWalks();
+
+  // Find a dorm 里"按整周课表排名"（app.js）
+  refreshRankOptions();
 
   // 有好几份课表时，最上面的切换栏（schedules.js）和对比表（compare.js）
   renderScheduleSwitcher();
@@ -559,8 +576,9 @@ function renderMyClasses() {
 
   // 已经确定的课：按一周的顺序排（先星期，再上课时间），读起来就像一张课表
   const confirmed = items.filter(function (c) { return c.status === 'confirmed'; }).sort(compareByWeek);
-  const review = items.filter(function (c) { return c.status === 'guess' || c.status === 'none'; }).sort(compareMeetings);
+  const review = items.filter(function (c) { return !c.draft && (c.status === 'guess' || c.status === 'none'); }).sort(compareMeetings);
   const skipped = items.filter(function (c) { return c.status === 'skipped'; });
+  const drafts = items.filter(function (c) { return c.draft; }); // 正在手动添加的课
 
   if (items.length === 0) {
     status.textContent = '';
@@ -612,11 +630,21 @@ function renderMyClasses() {
       Add your own schedule below and it replaces the sample.</div>`;
   }
 
+  // 0. 正在手动添加的课：放最上面
+  if (drafts.length > 0) {
+    html += '<ul class="class-list">' + drafts.map(renderCard).join('') + '</ul>';
+  }
+
   // 1. 需要确认的放最上面，并有一个醒目的提示
   if (review.length > 0) {
-    html += `<div class="review-banner">⚠ ${review.length} ${review.length === 1 ? 'class needs' : 'classes need'} your check before ${review.length === 1 ? 'it is' : 'they are'} on your map.
-      <button type="button" class="banner-button" data-action="scan-all">📷 Add another screenshot or file</button>
-      <span class="banner-hint">Rooms we can read from it are filled in for you.</span>
+    // 一句话 + 一个按钮：一次补完所有课的教室；还可以再传一张有教室的截图
+    const needRooms = coursesNeedingRooms().length;
+    html += `<div class="review-banner">
+      <span>${needRooms} ${needRooms === 1 ? 'course needs' : 'courses need'} a room to show on your map.</span>
+      <div class="review-banner-actions">
+        <button type="button" class="small-button small-button-filled" data-action="rooms">Add rooms</button>
+        <button type="button" class="link-button" data-action="scan-all">or add a file with rooms</button>
+      </div>
     </div>`;
     html += '<ul class="class-list">' + review.map(renderCard).join('') + '</ul>';
   }
@@ -628,7 +656,8 @@ function renderMyClasses() {
 
   // 3. 跳过的：折叠起来，可以恢复
   if (skipped.length > 0) {
-    html += `<details class="skipped-list"><summary>Skipped (${skipped.length})</summary><ul class="class-list">`;
+    // 删掉的和跳过的（线上课）都在这里，不上地图，随时可以 Restore
+    html += `<details class="skipped-list"><summary>Removed &amp; skipped (${skipped.length})</summary><ul class="class-list">`;
     skipped.forEach(function (c) {
       html += `
         <li class="class-card skipped" data-id="${c.id}">
@@ -638,6 +667,11 @@ function renderMyClasses() {
         </li>`;
     });
     html += '</ul></details>';
+  }
+
+  // 识别漏掉了某节课：自己加
+  if (!myClasses.selecting && drafts.length === 0) {
+    html += '<p class="manual-row"><button type="button" class="link-button" data-action="add-manual">+ Add a missing class by hand</button></p>';
   }
 
   // 4. 告诉用户课存在哪里，并且可以一键清空（比如用的是公用电脑）
@@ -812,7 +846,7 @@ function renderSelectToolbar(count) {
     </div>
     ${renderMoveRow(none)}
     <button type="button" class="delete-button" data-action="bulk-delete" ${none}>
-      Delete ${n} ${n === 1 ? 'class' : 'classes'}
+      Remove ${n} ${n === 1 ? 'class' : 'classes'}
     </button>
   </div>`;
 }
@@ -832,12 +866,18 @@ function renderSelectableCard(c) {
     </li>`;
 }
 
-// 批量操作：把勾选的课删掉（可以 Undo）
+// 批量操作：把勾选的课拿掉（可以 Undo）
+// 不真的删：收进列表最下面的 "Removed & skipped"，过了 Undo 的时间也能一门一门放回来
 function bulkDelete() {
   const ids = myClasses.selected;
   const n = ids.size;
-  changeWithUndo(`Deleted ${n} ${n === 1 ? 'class' : 'classes'}`, function () {
-    myClasses.items = myClasses.items.filter(function (c) { return !ids.has(c.id); });
+  changeWithUndo(`Removed ${n} ${n === 1 ? 'class' : 'classes'}`, function () {
+    myClasses.items.forEach(function (c) {
+      if (ids.has(c.id) && c.status !== 'skipped') {
+        c.statusBeforeSkip = c.status;
+        c.status = 'skipped';
+      }
+    });
   });
   endSelecting();
 }
@@ -873,6 +913,87 @@ function updateBulkLocationButton() {
   button.textContent = found
     ? `Set to ${found.place.code || found.place.name}${found.room ? ' ' + found.room : ''}`
     : 'Set location';
+}
+
+// ===== 课的详情：课名、课号、类型、星期、时间（编辑卡片和导入预览共用） =====
+
+// 分钟数 ↔ <input type="time"> 的值（"09:05"）
+function toTimeValue(minutes) {
+  if (minutes == null) {
+    return '';
+  }
+  return String(Math.floor(minutes / 60)).padStart(2, '0') + ':' + String(minutes % 60).padStart(2, '0');
+}
+
+function fromTimeValue(value) {
+  const m = /^(\d{2}):(\d{2})/.exec(value || '');
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+// 一组可以改的输入框。输入：一门课（或导入预览里的一行）
+function renderDetailFields(c) {
+  const days = DAY_ORDER.map(function (d) {
+    return `<label class="day-chip"><input type="checkbox" class="f-day" value="${d}" ${c.days.includes(d) ? 'checked' : ''}><span>${DAY_SHORT[d]}</span></label>`;
+  }).join('');
+  return `
+    <div class="detail-fields">
+      <label class="field">Class name
+        <input type="text" class="f-title" maxlength="80" value="${escapeAttr(c.title || '')}" placeholder="e.g. Calculus 1" translate="no">
+      </label>
+      <div class="field-row">
+        <label class="field">Course number
+          <input type="text" class="f-course" maxlength="20" value="${escapeAttr(c.course || '')}" placeholder="e.g. CASMA 123" translate="no">
+        </label>
+        <label class="field field-short">Type
+          <input type="text" class="f-section" maxlength="10" value="${escapeAttr(c.section || '')}" placeholder="LEC" translate="no">
+        </label>
+      </div>
+      <fieldset class="field day-field"><legend>Days</legend><div class="day-chips">${days}</div></fieldset>
+      <div class="field-row">
+        <label class="field">Starts<input type="time" class="f-start" value="${toTimeValue(c.start)}"></label>
+        <label class="field">Ends<input type="time" class="f-end" value="${toTimeValue(c.end)}"></label>
+      </div>
+      <p class="detail-error" role="alert"></p>
+    </div>`;
+}
+
+// 读出输入框里的值，并检查
+// 输出：{ title, course, section, days, start, end, time }；有问题时是 { error: '给用户看的话' }
+function readDetailFields(box) {
+  const value = function (cls) { return box.querySelector(cls).value.replace(/\s+/g, ' ').trim(); };
+  const course = value('.f-course').toUpperCase();
+  const title = value('.f-title') || course;
+  const start = fromTimeValue(box.querySelector('.f-start').value);
+  const end = fromTimeValue(box.querySelector('.f-end').value);
+  if (!title) {
+    return { error: 'Add a class name or a course number.' };
+  }
+  if (start === null && end !== null) {
+    return { error: 'Add a start time too.' };
+  }
+  if (start !== null && end !== null && end <= start) {
+    return { error: 'The end time must be after the start time.' };
+  }
+  return {
+    title: title,
+    course: course,
+    section: value('.f-section').toUpperCase(),
+    days: sortDays(Array.from(box.querySelectorAll('.f-day:checked')).map(function (i) { return i.value; })),
+    start: start,
+    end: start === null ? null : end,
+    time: start === null ? '' : formatTimeRange({ start: start, end: end })
+  };
+}
+
+// 把改好的详情放回一门课；课号改了，推测的候选楼也重新算
+function applyDetails(item, details) {
+  if (details.course !== item.course) {
+    item.candidates = guessLocations(details.course, myClasses.placeIndex);
+  }
+  Object.assign(item, {
+    title: details.title, course: details.course, section: details.section,
+    days: details.days, start: details.start, end: details.end, time: details.time
+  });
 }
 
 // 展开后的确认 / 编辑界面
@@ -920,8 +1041,25 @@ function renderEditor(c) {
       </span>
     </label>`;
 
+  // 手动添加的新课：只有"填一个地点"，没有截图可以再传
+  if (c.draft) {
+    return `
+      <li class="class-card editing" data-id="${c.id}" data-mode="new">
+        <strong>Add a class by hand</strong>
+        <p class="card-note">For a class time we missed. Fill in what your schedule says.</p>
+        ${renderDetailFields(c)}
+        <p class="field-heading">Where it meets</p>
+        <div class="location-options">${optionsHtml}</div>
+        <button type="button" class="primary-button" data-action="confirm" disabled>Choose a location above</button>
+        <div class="secondary-actions">
+          <button type="button" class="link-button" data-action="save-details">Save without a location</button>
+          <button type="button" class="link-button" data-action="cancel">Cancel</button>
+        </div>
+      </li>`;
+  }
+
   const intro = isEdit
-    ? 'Change where this class meets.'
+    ? 'Fix anything we read wrong, or change where this class meets.'
     : (c.status === 'guess'
       ? "Your schedule doesn't list a room for this class. Here's where it might be — <strong>check your schedule</strong> and pick the right one."
       : "Your schedule doesn't list a room, and we can't guess one. If it meets in person, tell us where. If it's online, skip it.");
@@ -931,12 +1069,18 @@ function renderEditor(c) {
       <strong translate="no">${escapeHtml(c.title)}</strong>
       ${classMetaLine(c)}
       <p class="card-note">${intro}</p>
+      <details class="detail-box"${isEdit ? ' open' : ''}>
+        <summary>Name, days and time</summary>
+        ${renderDetailFields(c)}
+      </details>
+      <p class="field-heading">Where it meets</p>
       <div class="location-options">${optionsHtml}</div>
       <button type="button" class="primary-button" data-action="confirm" disabled>Choose a location above</button>
       <button type="button" class="scan-one-button" data-action="scan-one">📷 Add a screenshot or file that shows this class</button>
       <p class="scan-message option-note">${c.scanMessage ? escapeHtml(c.scanMessage) : ''}</p>
       <div class="secondary-actions">
         <button type="button" class="link-button" data-action="skip">${isEdit ? 'Remove from my map' : "It's online · Skip"}</button>
+        ${isEdit ? '' : '<button type="button" class="link-button" data-action="save-details">Save details only</button>'}
         <button type="button" class="link-button" data-action="cancel">Cancel</button>
       </div>
     </li>`;
@@ -999,6 +1143,261 @@ function updateConfirmButton(card) {
   }
 }
 
+// 编辑卡片里的详情：检查不通过时，在卡片里说明原因，把详情那一块展开，返回 null
+function readCardDetails(card) {
+  const details = readDetailFields(card);
+  const error = card.querySelector('.detail-error');
+  error.textContent = details.error || '';
+  if (details.error) {
+    const box = card.querySelector('.detail-box');
+    if (box) {
+      box.open = true;
+    }
+    error.scrollIntoView({ block: 'nearest' });
+    return null;
+  }
+  return details;
+}
+
+// ===== 一次补完教室 =====
+//
+// 文件里没有教室时，一门一门点 Review 太累，很多人补到第二门就放弃了，课间步行就一直是空的
+// 所以放进一个弹窗：一门课一行（LEC、DIS 一般在同一栋楼，只问一次），推测的楼直接是按钮，点一下就好
+
+// 还要补地点的课，按课号合在一起
+// 输出：[{ key, course, title, items: [这门课的各个时段], candidates: 推测的楼 }]
+function coursesNeedingRooms() {
+  const groups = [];
+  myClasses.items.forEach(function (c) {
+    if (c.draft || c.sample || (c.status !== 'guess' && c.status !== 'none')) {
+      return;
+    }
+    const key = (c.course || c.title).toUpperCase();
+    let group = groups.find(function (g) { return g.key === key; });
+    if (!group) {
+      group = { key: key, course: c.course, title: c.title, items: [], candidates: c.candidates || [] };
+      groups.push(group);
+    }
+    group.items.push(c);
+  });
+  return groups.sort(function (a, b) { return a.key < b.key ? -1 : 1; });
+}
+
+// afterImport：刚从导入预览过来（加了几个时段），弹窗里说明这是第 2 步
+function openRoomsDialog(afterImport) {
+  if (coursesNeedingRooms().length === 0) {
+    return;
+  }
+  logEvent('rooms-dialog');
+  myClasses.roomsAfterImport = afterImport || 0;
+  myClasses.roomDraft = {}; // 课号 → { place, room, other: 正在输入别的地方, otherText, skip: 线上课 }
+  renderRoomsDialog();
+  const dialog = document.getElementById('rooms-dialog');
+  if (!dialog.open) {
+    dialog.showModal();
+  }
+}
+
+function closeRoomsDialog() {
+  const dialog = document.getElementById('rooms-dialog');
+  if (dialog.open) {
+    dialog.close();
+  }
+  dialog.innerHTML = '';
+  myClasses.roomDraft = null;
+}
+
+// 一门课的一行：课名、这门课的几个时段，推测的楼（按钮）、别的地方、线上课
+function renderRoomRow(group) {
+  const draft = myClasses.roomDraft[group.key] || {};
+  const meetings = group.items.slice().sort(compareMeetings).map(function (c) {
+    return [c.section, shortWhen(c)].filter(Boolean).join(' ');
+  }).join(' · ');
+  const chips = group.candidates.map(function (o) {
+    const selected = draft.place && !draft.other && draft.place.id === o.place.id;
+    return `<button type="button" class="room-chip${selected ? ' selected' : ''}" data-action="room-pick" data-place="${escapeAttr(o.place.id)}"
+      title="${escapeAttr(o.place.name + ' · ' + o.reason)}" aria-pressed="${selected}" translate="no">${escapeHtml(o.place.code || o.place.name)}</button>`;
+  }).join('');
+  const otherPicked = draft.other || (draft.place && !group.candidates.some(function (o) { return o.place.id === draft.place.id; }));
+  let detail = '';
+  if (draft.other) {
+    const found = resolveLocationText(draft.otherText || '', myClasses.placeIndex);
+    detail = `<div class="room-detail">
+        <input type="search" class="room-other-input" list="place-options" value="${escapeAttr(draft.otherText || '')}"
+          placeholder="Building or room, e.g. CAS 211, GSU" aria-label="Where ${escapeAttr(group.course)} meets" translate="no">
+        <span class="room-preview">${found ? '→ ' + escapeHtml(found.place.name) + (found.room ? ', room ' + escapeHtml(found.room) : '') : (draft.otherText ? 'Not in our building list' : '')}</span>
+      </div>`;
+  } else if (draft.place) {
+    detail = `<div class="room-detail">
+        <span class="room-picked" translate="no">${escapeHtml(draft.place.name)}</span>
+        <input type="text" class="room-number" value="${escapeAttr(draft.room || '')}" placeholder="Room # (optional)" aria-label="Room number" maxlength="12" translate="no">
+      </div>`;
+  }
+  return `
+    <li class="room-row${draft.place || draft.skip ? ' done' : ''}" data-key="${escapeAttr(group.key)}">
+      <div class="room-course">
+        <strong translate="no">${escapeHtml(group.title || group.course)}</strong>
+        <span class="room-meetings" translate="no">${escapeHtml(group.course)}${meetings ? ' · ' + escapeHtml(meetings) : ''}</span>
+      </div>
+      <div class="room-choices">
+        ${chips}
+        <button type="button" class="room-chip${otherPicked ? ' selected' : ''}" data-action="room-other">${group.candidates.length > 0 ? 'Other' : 'Pick a building'}</button>
+        <button type="button" class="room-chip room-chip-quiet${draft.skip ? ' selected' : ''}" data-action="room-skip" aria-pressed="${Boolean(draft.skip)}">Online</button>
+      </div>
+      ${detail}
+    </li>`;
+}
+
+function renderRoomsDialog() {
+  const dialog = document.getElementById('rooms-dialog');
+  const groups = coursesNeedingRooms();
+  const draft = myClasses.roomDraft;
+  const done = groups.filter(function (g) { return draft[g.key] && (draft[g.key].place || draft[g.key].skip); }).length;
+  const scroll = dialog.querySelector('.dlg-body') ? dialog.querySelector('.dlg-body').scrollTop : 0;
+  dialog.innerHTML = `
+    <div class="dlg-head">
+      <div class="dlg-title">
+        ${myClasses.roomsAfterImport ? `<p class="dlg-step">Step 2 of 2 · ${myClasses.roomsAfterImport} class ${myClasses.roomsAfterImport === 1 ? 'time' : 'times'} added</p>` : ''}
+        <h2 id="rooms-dialog-title">Where are your classes?</h2>
+        <p class="dlg-lead">Tap the building for each course. We guessed from the course number, so check it against your schedule.</p>
+      </div>
+      <button type="button" class="dlg-close" data-action="rooms-cancel" aria-label="Close without saving">×</button>
+    </div>
+    <div class="dlg-body dlg-body-single">
+      <ul class="room-list">${groups.map(renderRoomRow).join('')}</ul>
+    </div>
+    <div class="dlg-foot">
+      <div class="dlg-foot-row">
+        <p class="import-foot-note">${done} of ${groups.length} ${groups.length === 1 ? 'course' : 'courses'} set${done < groups.length ? '. You can do the rest later.' : '.'}</p>
+        <button type="button" class="ghost-button" data-action="rooms-cancel">Cancel</button>
+        <button type="button" class="primary-button" data-action="rooms-save" ${done === 0 ? 'disabled' : ''}>Save</button>
+      </div>
+    </div>`;
+  dialog.querySelector('.dlg-body').scrollTop = scroll;
+}
+
+// 把弹窗里还没记下的输入框（教室号、别的地方）记下来，再重画或保存
+function keepRoomInputs() {
+  const dialog = document.getElementById('rooms-dialog');
+  dialog.querySelectorAll('.room-row').forEach(function (li) {
+    const draft = myClasses.roomDraft[li.dataset.key];
+    if (!draft) {
+      return;
+    }
+    const number = li.querySelector('.room-number');
+    if (number) {
+      draft.room = number.value.trim();
+    }
+    const other = li.querySelector('.room-other-input');
+    if (other) {
+      draft.otherText = other.value;
+      const found = resolveLocationText(other.value, myClasses.placeIndex);
+      draft.place = found ? found.place : null;
+      draft.room = found ? found.room : '';
+    }
+  });
+}
+
+function handleRoomsClick(event) {
+  const button = event.target.closest('button[data-action]');
+  if (!button) {
+    return;
+  }
+  const action = button.dataset.action;
+  if (action === 'rooms-cancel') {
+    closeRoomsDialog();
+    return;
+  }
+  keepRoomInputs();
+  if (action === 'rooms-save') {
+    saveRooms();
+    return;
+  }
+  const li = button.closest('.room-row');
+  const group = coursesNeedingRooms().find(function (g) { return g.key === li.dataset.key; });
+  const draft = myClasses.roomDraft;
+  if (action === 'room-pick') {
+    const pick = group.candidates.find(function (o) { return o.place.id === button.dataset.place; });
+    draft[group.key] = { place: pick.place, room: '' };
+  } else if (action === 'room-other') {
+    draft[group.key] = { other: true, otherText: '' };
+  } else if (action === 'room-skip') {
+    draft[group.key] = draft[group.key] && draft[group.key].skip ? {} : { skip: true };
+  }
+  renderRoomsDialog();
+  if (action === 'room-other') {
+    const input = document.querySelector(`#rooms-dialog .room-row[data-key="${group.key}"] .room-other-input`);
+    if (input) {
+      input.focus();
+    }
+  }
+}
+
+// "别的地方"输入框：打字时只更新下面那行"→ 认出来是哪里"；离开输入框（change）再重画，按钮上的数字跟着变
+function handleRoomsInput(event) {
+  if (!event.target.classList.contains('room-other-input')) {
+    return;
+  }
+  const found = resolveLocationText(event.target.value, myClasses.placeIndex);
+  const preview = event.target.parentElement.querySelector('.room-preview');
+  preview.textContent = found
+    ? '→ ' + found.place.name + (found.room ? ', room ' + found.room : '')
+    : (event.target.value.trim() ? 'Not in our building list' : '');
+  if (event.type === 'change') {
+    keepRoomInputs();
+    renderRoomsDialog();
+  }
+}
+
+// 保存：每门课的所有时段一起设好；选了 Online 的收进 "Removed & skipped"（可以恢复）
+function saveRooms() {
+  const groups = coursesNeedingRooms();
+  const draft = myClasses.roomDraft;
+  const chosen = groups.filter(function (g) { return draft[g.key] && (draft[g.key].place || draft[g.key].skip); });
+  closeRoomsDialog();
+  if (chosen.length === 0) {
+    return;
+  }
+  logEvent('rooms-saved');
+  changeWithUndo(`Set ${chosen.length} ${chosen.length === 1 ? 'course' : 'courses'}`, function () {
+    chosen.forEach(function (g) {
+      const d = draft[g.key];
+      g.items.forEach(function (c) {
+        if (d.skip) {
+          c.statusBeforeSkip = c.status;
+          c.status = 'skipped';
+        } else {
+          Object.assign(c, {
+            place: d.place, room: d.room || '', code: d.place.code || '',
+            status: 'confirmed', source: 'user', scanSuggestion: null, scanMessage: ''
+          });
+        }
+      });
+    });
+  });
+}
+
+// 手动添加：一门空的课，标成 draft（不存、不上地图），展开编辑卡片
+function startManualClass() {
+  logEvent('manual-add');
+  myClasses.items = myClasses.items.filter(function (c) { return !c.draft; });
+  const item = {
+    id: nextClassId++, title: '', course: '', section: '', start: null, end: null, time: '', days: [],
+    place: null, code: '', room: '', noRoom: false, candidates: [], status: 'none', source: 'user',
+    scanSuggestion: null, scanMessage: '', draft: true
+  };
+  myClasses.items.push(item);
+  myClasses.openId = item.id;
+  showTab('week');
+  renderMyClasses();
+  const card = document.querySelector(`#schedule-list [data-id="${item.id}"]`);
+  if (card) {
+    updateConfirmButton(card);
+    card.scrollIntoView({ block: 'nearest' });
+    card.querySelector('.f-title').focus();
+  }
+}
+
 function findItem(card) {
   const id = Number(card.dataset.id);
   return myClasses.items.find(function (c) { return c.id === id; });
@@ -1032,6 +1431,7 @@ function handleListClick(event) {
   if (action === 'select-start') {
     myClasses.selecting = true;
     myClasses.openId = null; // 收起正在编辑的卡片
+    myClasses.items = myClasses.items.filter(function (c) { return !c.draft; });
     clearClassPreview();
     renderMyClasses();
     return;
@@ -1086,6 +1486,18 @@ function handleListClick(event) {
     return;
   }
 
+  // 一次补完教室
+  if (action === 'rooms') {
+    openRoomsDialog();
+    return;
+  }
+
+  // 手动添加一节课：先放一门空的"草稿"课，展开它的编辑卡片
+  if (action === 'add-manual') {
+    startManualClass();
+    return;
+  }
+
   // 提示条上的"再传一张截图"：不属于某一门课，打开普通的上传框
   if (action === 'scan-all') {
     document.getElementById('schedule-file').click();
@@ -1126,14 +1538,31 @@ function handleListClick(event) {
     }
   } else if (action === 'cancel') {
     myClasses.openId = null;
+    myClasses.items = myClasses.items.filter(function (c) { return !c.draft; });
     clearClassPreview();
     renderMyClasses();
+  } else if (action === 'save-details') {
+    // 只改课名、星期、时间，地点先不定（还在等确认的课保持原来的状态）
+    const details = readCardDetails(card);
+    if (!details) {
+      return;
+    }
+    changeWithUndo(item.draft ? `Added ${details.title}` : `Saved ${details.title}`, function () {
+      applyDetails(item, details);
+      if (item.draft) {
+        delete item.draft;
+        item.status = item.candidates.length > 0 ? 'guess' : 'none';
+      }
+    });
   } else if (action === 'confirm') {
     const selection = readSelection(card, item);
-    if (!selection) {
+    const details = readCardDetails(card);
+    if (!selection || !details) {
       return; // 按钮是灰的时候本来就点不了，这里再保险一次
     }
-    changeWithUndo(`${item.title} → ${selection.place.name}`, function () {
+    changeWithUndo(`${details.title} → ${selection.place.name}`, function () {
+      applyDetails(item, details);
+      delete item.draft;
       Object.assign(item, {
         place: selection.place,
         room: selection.room,
@@ -1192,7 +1621,7 @@ function undoLastChange() {
   if (typeof myClasses.undo === 'function') {
     myClasses.undo();
   } else {
-    myClasses.items = myClasses.undo;
+    myClasses.items = myClasses.undo.filter(function (c) { return !c.draft; });
   }
   myClasses.undo = null;
   myClasses.openId = null;
@@ -1224,18 +1653,24 @@ async function handleScheduleFiles(files) {
   const status = document.getElementById('schedule-status');
   removeSampleClasses();
 
-  hideOcrTip(); // 新的一次导入：上一次的提示先收起来
+  hideOcrTip(); // 新的一次导入：上一次的提示、结果、没做完的导入预览先收起来
+  status.textContent = '';
+  dropPendingImport();
+  renderImportChoice();
 
   // 1. 先把所有文件都在浏览器里读一遍，再决定放进哪一份课表
   const results = [];
   const errors = [];
   let failedImages = [];   // 网站自己读不出课的截图（一门课都没认出来，或者根本读不了）
+  const doubtful = [];     // 网站读出了课、但看起来不对的截图（有课缺时间或星期）
   const context = {}; // 按顺序读：表格截图被切成几张时，下一张开头的课接着上一张的星期
   for (let i = 0; i < files.length; i++) {
     const result = await readOneFile(files[i], i + 1, files.length, context);
     const isImage = /^image\//.test(files[i].type) || /\.(png|jpe?g|heic|webp|gif)$/i.test(files[i].name);
     if (isImage && (result.error || result.located.length + result.unlocated.length === 0)) {
       failedImages.push(files[i]); // 截图读不出来：先不报错，下面交给 AI
+    } else if (isImage && looksDoubtful(result)) {
+      doubtful.push({ file: files[i], result: result }); // 读出来了，但缺时间或星期：下面让 AI 再读一遍
     } else if (result.error) {
       errors.push(result.error);
     } else {
@@ -1254,17 +1689,30 @@ async function handleScheduleFiles(files) {
     aiNote = ai.errors.length > 0 ? ai.errors[0] : 'Our AI reader couldn’t find classes in it either.';
   }
 
-  // 读完了："Reading …" 这类进度提示换成出错的原因；都读成功了就清空
+  // 3. 读得不完整的截图：也交给 AI；AI 读得更完整就用 AI 的，否则还是用网站自己读的（用户可以在预览里改）
+  for (const item of doubtful) {
+    let best = item.result;
+    if (aiAvailable()) {
+      const ai = await readImagesWithAi([item.file]);
+      if (ai.results.length > 0 && completeMeetings(ai.results[0]) >= completeMeetings(item.result)) {
+        best = ai.results[0];
+      }
+    }
+    results.push(best);
+  }
+
+  // 读完了："Reading …" 这类进度提示换成出错的原因；读出了课的话，出错的原因写进导入预览里
   status.textContent = errors.join(' ');
   errors.forEach(function () { logEvent('import-error'); });
   if (results.length > 0) {
     const source = files.length === 1 ? `"${files[0].name}"` : `${files.length} files`;
-    offerImport(results, source);
-    // 截图把星期标题裁掉了：星期是按下一个标题往前推的，提醒用户看一眼
+    // 截图把星期标题裁掉了：星期是按下一个标题往前推的，预览里提醒用户看一眼
     const guessed = sortDays([].concat.apply([], results.map(function (r) { return r.guessedDays || []; })));
-    if (guessed.length > 0) {
-      status.textContent = (status.textContent + ` A day heading was cut off in your screenshot, so we guessed ${guessed.join(', ')} for some classes. Check their days in My classes.`).trim();
-    }
+    // 表头只有日期没有星期：星期是按日期推算的，记下用的是哪一年
+    const dated = results.find(function (r) { return r.dateYear; });
+    // 截图：预览里可以展开对照（只是这台设备上的临时网址，不上传）
+    const images = files.filter(function (f) { return /^image\//.test(f.type); }).map(function (f) { return URL.createObjectURL(f); });
+    offerImport(results, source, { guessed: guessed, errors: errors, dateYear: dated ? dated.dateYear : null, images: images });
   }
   // 网站和 AI 都没认出课的截图：不只说"没找到"，而是教用户怎么把截图里的字复制出来、粘贴进来
   // AI 已经试过了，提示卡里就不再放 "Read with AI" 按钮
@@ -1273,6 +1721,19 @@ async function handleScheduleFiles(files) {
   }
   // 如果是从 "Find classes you share" 来的：换回自己的课表，打开 Shared classes（schedules.js）
   finishFindShared();
+}
+
+// 有几个时段是完整的（时间、星期都有）
+function completeMeetings(result) {
+  return result.located.concat(result.unlocated).filter(function (m) {
+    return m.start != null && m.days.length > 0;
+  }).length;
+}
+
+// 截图读出来的课看起来不对：有课缺时间或星期（比如日历的星期表头没认出来）
+function looksDoubtful(result) {
+  const all = result.located.concat(result.unlocated);
+  return completeMeetings(result) < all.length;
 }
 
 // ===== 截图没认出课时的提示 =====
@@ -1389,7 +1850,9 @@ async function readOcrTipWithAi() {
   const ai = await readImagesWithAi(images);
   if (ai.results.length > 0) {
     hideOcrTip();
-    offerImport(ai.results, images.length === 1 ? `"${images[0].name}"` : `${images.length} screenshots`);
+    const dated = ai.results.find(function (r) { return r.dateYear; });
+    offerImport(ai.results, images.length === 1 ? `"${images[0].name}"` : `${images.length} screenshots`,
+      { dateYear: dated ? dated.dateYear : null });
     return;
   }
   status.textContent = ai.errors.length > 0
@@ -1424,41 +1887,82 @@ async function pasteFromOcrTip() {
   }
 }
 
-// ===== 导入时：加进当前这份课表，还是另存一份 =====
+// ===== 导入：先核对，再加进课表 =====
 //
-// 只有当前这份课表里已经有自己的课时才问（第一次导入、只有示例课时不问，直接加）
-// 默认是"加进当前这份"：一份课表分成好几张截图时，用户直接点 Done 就行
+// 读到的课不直接放进课表，先显示一张"导入预览"：每个上课时段一行，可以改、删、补上漏掉的
+// 识别不可能百分之百准，所以一定要让用户对照原图看一眼，有错能当场改
+// 当前这份课表里已经有自己的课时，同一张卡片里再问"加进当前这份，还是另存一份"
 // 读到的课大多和现在的不一样时，提醒一句"看起来是另一份课表"，但还是让用户自己选
 
 // 读完文件、或者粘贴的文字以后都走这里
 // 输入：[{ located, unlocated }]（每个文件一份）、给用户看的来源（比如 '"Fall 2026 calendar.ics"'）
-function offerImport(results, source) {
+//       options（可以不传）：
+//         review：要不要先预览核对（默认要；分享链接里的课是整理好的，不用）
+//         guessed：哪几天是猜的（截图把星期标题裁掉了）；errors：其他文件读不了的原因
+//         dateYear：截图表头只有日期时，推算星期用的年份
+//         images：截图在这台设备上的临时网址（URL.createObjectURL），预览里可以展开对照
+function offerImport(results, source, options) {
+  const opts = Object.assign({ review: true, guessed: [], errors: [], dateYear: null }, options || {});
   const found = [].concat.apply([], results.map(function (r) { return r.located.concat(r.unlocated); }));
+  const status = document.getElementById('schedule-status');
   // 统计：读出了几门课（只记区间）
   logEvent(found.length === 0 ? 'import-empty' : 'import-ok-' + classCountBucket(found.length));
-  const hasOwnClasses = myClasses.items.some(function (c) { return !c.sample; });
-  if (found.length === 0 || !hasOwnClasses) {
-    applyImport(results, 'add', '');
+  if (found.length === 0) {
+    status.textContent = [`Couldn't find any classes in ${source}. Try a clearer screenshot, paste the text, or add a class by hand.`]
+      .concat(opts.errors).join(' ');
     return;
   }
+  const hasOwnClasses = myClasses.items.some(function (c) { return !c.sample && !c.draft; });
   // 读到的课里，有几门当前这份课表里已经有了（同一门课、同一个时段）
   const already = found.filter(function (c) {
     return myClasses.items.some(function (item) { return sameMeeting(item, c); });
   }).length;
   // 全都已经有了（比如同一个文件又传了一次）：没有新东西，不用问，问了反而容易多出一份一样的课表
   // 还是照常合并一遍：文件里可能有原来没读到的教室、时间，可以补上
-  if (already === found.length) {
+  if (hasOwnClasses && already === found.length) {
     logEvent('import-all-already');
     if (applyImport(results, 'add', '') > 0) {
       return; // 补上了地点：已经有 "Updated N classes… Undo" 的提示
     }
-    document.getElementById('schedule-status').textContent =
-      `All ${found.length} ${found.length === 1 ? 'class' : 'classes'} from ${source} ${found.length === 1 ? 'is' : 'are'} already in "${activeSchedule().name}".`;
+    flashStatus(`All ${found.length} ${found.length === 1 ? 'class' : 'classes'} from ${source} ${found.length === 1 ? 'is' : 'are'} already in "${activeSchedule().name}".`);
     return;
   }
-  myClasses.pendingImport = { results: results, source: source, count: found.length, already: already };
+  // 不用预览、也不用问加到哪里：直接加
+  if (!opts.review && !hasOwnClasses) {
+    applyImport(results, 'add', '');
+    return;
+  }
+  let nextRow = 1;
+  myClasses.pendingImport = {
+    results: results,
+    source: source,
+    count: found.length,
+    already: already,
+    askTarget: hasOwnClasses,
+    guessed: opts.guessed,
+    errors: opts.errors,
+    dateYear: opts.dateYear,
+    images: opts.images || [], // 用户传的截图（只在这台设备上显示，方便对照）
+    // 预览里的每一行：读到的一个上课时段，外加"地点"输入框里的文字
+    rows: opts.review ? found.map(function (c) {
+      const text = c.place ? (c.place.code || c.place.name) + (c.room ? ' ' + c.room : '') : '';
+      return Object.assign({}, c, {
+        days: c.days.slice(), key: nextRow++, locationText: text, readLocationText: text, open: false
+      });
+    }) : null,
+    nextRow: nextRow
+  };
+  // 同一个课号、拼法差一点的课名（"Linear" / "Linsar"）：统一起来；一样多的让用户选
+  if (myClasses.pendingImport.rows) {
+    const existing = myClasses.items.filter(function (c) { return !c.sample && !c.draft && c.status !== 'skipped'; });
+    myClasses.pendingImport.titleReport = unifyTitles(myClasses.pendingImport.rows, existing);
+  }
+  // 读文件时出的错（比如另一个文件读不了）写在预览卡片里；"Reading…" 这类进度提示清掉
+  status.textContent = '';
   renderImportChoice();
-  document.getElementById('import-choice').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  if (!myClasses.pendingImport.rows) {
+    document.getElementById('import-choice').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
 }
 
 // 真正把读到的课放进去
@@ -1491,36 +1995,342 @@ function applyImport(results, target, name) {
   return filledIn;
 }
 
-// 显示"加进哪一份"的选择卡片；没有要选的时候清空
+// 关掉导入预览；预览里给截图开的临时网址也一起释放
+function dropPendingImport() {
+  const pending = myClasses.pendingImport;
+  if (pending && pending.images) {
+    pending.images.forEach(function (url) { URL.revokeObjectURL(url); });
+  }
+  myClasses.pendingImport = null;
+}
+
+// 预览里一行的"地点"：输入框里的文字没改过，就用读到的；改过了，重新认
+function rowLocation(row) {
+  if (row.place && row.locationText === row.readLocationText) {
+    return { place: row.place, room: row.room };
+  }
+  return resolveLocationText(row.locationText, myClasses.placeIndex);
+}
+
+// 预览里展开的行：把输入框里的值记回这一行（不检查），重画卡片时才不会丢掉用户正在改的内容
+function keepOpenRowInputs(box) {
+  const pending = myClasses.pendingImport;
+  if (!pending || !pending.rows) {
+    return;
+  }
+  box.querySelectorAll('.preview-row.editing').forEach(function (li) {
+    const row = pending.rows.find(function (r) { return r.key === Number(li.dataset.row); });
+    if (!row) {
+      return;
+    }
+    Object.assign(row, {
+      title: li.querySelector('.f-title').value,
+      course: li.querySelector('.f-course').value,
+      section: li.querySelector('.f-section').value,
+      days: Array.from(li.querySelectorAll('.f-day:checked')).map(function (i) { return i.value; }),
+      start: fromTimeValue(li.querySelector('.f-start').value),
+      end: fromTimeValue(li.querySelector('.f-end').value),
+      locationText: li.querySelector('.f-location').value
+    });
+  });
+}
+
+// 关上一行：检查输入，通过了才收起。输出：通过了没有
+function closePreviewRow(li) {
+  const row = myClasses.pendingImport.rows.find(function (r) { return r.key === Number(li.dataset.row); });
+  const details = readDetailFields(li);
+  if (details.error) {
+    li.querySelector('.detail-error').textContent = details.error;
+    li.scrollIntoView({ block: 'nearest' });
+    return false;
+  }
+  Object.assign(row, details, { locationText: li.querySelector('.f-location').value.trim(), open: false });
+  return true;
+}
+
+// ===== 导入预览：让用户一眼看出哪里不对 =====
+//
+// 大多数人不会逐行核对。所以：
+//   1. 先画一张小小的周课表：日期全错了（比如全在周六）一眼就看得出来，比读一串文字快得多
+//   2. 网站自己先挑出"可疑"的行（缺星期、缺时间、在周末、和别的课撞时间、课名像认错了），
+//      放在最上面，直接在那一行里给出要改的那一项（不是一整张表单）
+//   3. 没问题的行收起来，只占一行；想看可以展开
+//   4. 按钮上方说清楚"不改会怎样"（比如没有星期的课不会算进课间步行），而不是只说"请检查"
+
+// 课名像不像认错了：比如 OCR 把 "Linear Algebra" 认成 "peste"
+function titleLooksMisread(row) {
+  const t = (row.title || '').trim();
+  if (!t || t.toUpperCase() === (row.course || '').toUpperCase()) {
+    return false; // 没读到课名：只用课号，不算错
+  }
+  return /^[a-z]{1,7}$/.test(t) || !/[aeiouy]/i.test(t) || /[^A-Za-z0-9 &,:'’()\-\/.+#]/.test(t);
+}
+
+// 这一行有哪些地方可疑
+// 输出：[{ kind: 'days' | 'time' | 'weekend' | 'clash' | 'name', text: '给用户看的话' }]
+function rowIssues(row, rows) {
+  const issues = [];
+  // 同一门课两种拼法：只在这门课的第一行问一次（选了以后这门课的所有时段一起改）
+  const firstOfCourse = rows.find(function (r) { return r.course === row.course && r.titleOptions; });
+  if (row.titleOptions && firstOfCourse === row) {
+    issues.push({ kind: 'pick', text: `Two spellings for ${row.course}. Which name is right?` });
+  }
+  if (row.days.length === 0) {
+    issues.push({ kind: 'days', text: 'Which days does it meet? We couldn’t tell.' });
+  }
+  if (row.start == null) {
+    issues.push({ kind: 'time', text: 'What time does it start and end?' });
+  }
+  const weekend = row.days.filter(function (d) { return d === 'Sat' || d === 'Sun'; });
+  if (weekend.length > 0) {
+    issues.push({ kind: 'weekend', text: `On ${weekend.join(' and ')}? Few classes meet then, so the day may be misread.` });
+  }
+  if (row.start != null) {
+    const clash = rows.find(function (other) {
+      return other !== row && other.start != null && other.days.some(function (d) { return row.days.includes(d); }) &&
+        other.start < (row.end || row.start + 50) && row.start < (other.end || other.start + 50);
+    });
+    if (clash) {
+      const day = clash.days.find(function (d) { return row.days.includes(d); });
+      issues.push({ kind: 'clash', text: `Overlaps ${clash.course || clash.title}${clash.section ? ' ' + clash.section : ''} on ${day}. One of the two days or times may be misread.` });
+    }
+  }
+  if (!row.titleOptions && titleLooksMisread(row)) {
+    issues.push({ kind: 'name', text: `“${row.title}” doesn’t look like a class name.` });
+  }
+  return issues;
+}
+
+// 用户点了"没问题"的行，不再算可疑
+function needsLook(row, rows) {
+  return !row.ok && rowIssues(row, rows).length > 0;
+}
+
+// 一行的星期 + 时间，比如 "Mon, Wed · 10:10 AM – 11:00 AM"
+function rowWhen(row) {
+  return [row.days.join(', '), row.time].filter(Boolean).join(' · ');
+}
+
+// 一行的地点文字
+function rowWhere(row) {
+  const location = rowLocation(row);
+  if (location) {
+    return locationLabel(location.place, location.room);
+  }
+  if (row.locationText) {
+    return `${keepOriginal(escapeHtml(row.locationText))} · not in our building list yet`;
+  }
+  return row.noRoom ? 'No room assigned' : 'No room listed';
+}
+
+// ----- 小周课表 -----
+
+// 输出：HTML；上课时段在格子里的位置按时间算，可疑的格子用琥珀色描边，点一下跳到那一行
+// focusKey：用户点过的那一行，课表里对应的格子加粗描边
+function renderMiniWeek(rows, focusKey) {
+  const timed = rows.filter(function (r) { return r.start != null && r.days.length > 0; });
+  const usesWeekend = timed.some(function (r) { return r.days.includes('Sat') || r.days.includes('Sun'); });
+  const days = usesWeekend ? DAY_ORDER : DAY_ORDER.slice(0, 5);
+  let from = 8 * 60;
+  let to = 17 * 60;
+  timed.forEach(function (r) {
+    from = Math.min(from, Math.floor(r.start / 60) * 60);
+    to = Math.max(to, Math.ceil((r.end || r.start + 50) / 60) * 60);
+  });
+  const pxPerMinute = 0.6; // 1 小时 36 像素：50 分钟的课放得下课号和时间
+  const height = (to - from) * pxPerMinute;
+
+  // 时间轴：每小时一个刻度，格子里每小时一条细线（--hour）
+  let axis = '';
+  for (let t = from; t <= to; t += 60) {
+    const h = t / 60;
+    axis += `<span class="mini-hour" style="top:${(t - from) * pxPerMinute}px">${h % 12 || 12}${h >= 12 ? 'p' : 'a'}</span>`;
+  }
+
+  const columns = days.map(function (day) {
+    const today = timed.filter(function (r) { return r.days.includes(day); })
+      .sort(function (a, b) { return a.start - b.start; });
+    // 撞时间的并排放：每个格子找一条不重叠的"车道"
+    const lanes = [];
+    const placed = today.map(function (r) {
+      const end = r.end || r.start + 50;
+      let lane = lanes.findIndex(function (laneEnd) { return laneEnd <= r.start; });
+      if (lane === -1) {
+        lane = lanes.length;
+        lanes.push(end);
+      } else {
+        lanes[lane] = end;
+      }
+      return { row: r, lane: lane, end: end };
+    });
+    const laneCount = Math.max(lanes.length, 1);
+    const blocks = placed.map(function (p) {
+      const flagged = needsLook(p.row, rows) ? ' flagged' : '';
+      const focused = p.row.key === focusKey ? ' focused' : '';
+      const label = (p.row.course || p.row.title).replace(/^[A-Z]{3}(?=[A-Z]{2}\s)/, ''); // CASMA 242 → MA 242
+      const tall = (p.end - p.row.start) * pxPerMinute >= 26;
+      const text = laneCount > 1 ? '' : `<span class="mini-code">${escapeHtml(label)}</span>` +
+        (tall ? `<span class="mini-time">${escapeHtml(formatClock(p.row.start).replace(/ [AP]M$/, ''))}</span>` : '');
+      return `<button type="button" class="mini-block${flagged}${focused}" data-action="row-focus" data-row="${p.row.key}"
+        style="top:${(p.row.start - from) * pxPerMinute}px;height:${Math.max((p.end - p.row.start) * pxPerMinute, 16)}px;left:calc(${p.lane / laneCount * 100}% + 1px);width:calc(${100 / laneCount}% - 2px)"
+        title="${escapeAttr((p.row.course + ' ' + p.row.section).trim() + ' · ' + rowWhen(p.row))}" translate="no">${text}</button>`;
+    }).join('');
+    const weekend = day === 'Sat' || day === 'Sun' ? ' weekend' : '';
+    return `<div class="mini-day${weekend}"><span class="mini-day-name">${day}</span><div class="mini-day-body" style="height:${height}px;--hour:${60 * pxPerMinute}px">${blocks}</div></div>`;
+  }).join('');
+
+  const off = rows.filter(function (r) { return r.start == null || r.days.length === 0; });
+  const offNote = off.length > 0
+    ? `<p class="mini-off">Not on the calendar yet: ${off.map(function (r) { return keepOriginal(escapeHtml((r.course + ' ' + r.section).trim())); }).join(', ')}</p>`
+    : '';
+  return `<div class="mini-week" aria-label="Your week as we read it">
+      <div class="mini-axis" style="height:${height}px">${axis}</div>
+      ${columns}
+    </div>${offNote}`;
+}
+
+// ----- 预览里的行 -----
+
+// 可疑的行：说清楚哪里可疑，并且直接在这一行里给出要改的那一项
+function renderIssueRow(row, rows) {
+  const issues = rowIssues(row, rows);
+  // 要改的输入框一旦出现就留着（改到一半问题消失了，输入框也不能突然不见）
+  row.fixKinds = Array.from(new Set((row.fixKinds || []).concat(issues.map(function (i) { return i.kind; }))));
+  const kinds = row.fixKinds;
+  const fixed = issues.length === 0;
+  let fix = '';
+  if (row.titleOptions && issues.some(function (i) { return i.kind === 'pick'; })) {
+    fix += `<div class="title-options">${row.titleOptions.map(function (t) {
+      return `<button type="button" class="quiet-button" data-action="pick-title" data-title="${escapeAttr(t)}" translate="no">${escapeHtml(t)}</button>`;
+    }).join('')}</div>`;
+  }
+  if (kinds.includes('name')) {
+    fix += `<label class="field">Class name<input type="text" class="q-title" maxlength="80" value="${escapeAttr(row.title)}" translate="no"></label>`;
+  }
+  if (kinds.some(function (k) { return k === 'days' || k === 'weekend' || k === 'clash'; })) {
+    fix += `<div class="day-chips q-days">${DAY_ORDER.map(function (d) {
+      return `<label class="day-chip"><input type="checkbox" class="q-day" value="${d}" ${row.days.includes(d) ? 'checked' : ''}><span>${DAY_SHORT[d]}</span></label>`;
+    }).join('')}</div>`;
+  }
+  if (kinds.includes('time') || kinds.includes('clash')) {
+    fix += `<div class="field-row">
+        <label class="field">Starts<input type="time" class="q-start" value="${toTimeValue(row.start)}"></label>
+        <label class="field">Ends<input type="time" class="q-end" value="${toTimeValue(row.end)}"></label>
+      </div>`;
+  }
+  return `
+    <li class="preview-row issue" data-row="${row.key}">
+      <div class="issue-head">
+        <strong translate="no">${escapeHtml(row.title || row.course)}</strong>
+        <span class="rank-detail">${keepOriginal(escapeHtml([row.course, row.section].filter(Boolean).join(' ')))}${rowWhen(row) ? ' · ' + escapeHtml(rowWhen(row)) : ''}</span>
+      </div>
+      ${fixed
+        ? '<p class="issue-fixed">Looks good now</p>'
+        : `<ul class="issue-list">${issues.map(function (i) { return `<li>${escapeHtml(i.text)}</li>`; }).join('')}</ul>`}
+      <div class="issue-fix">${fix}</div>
+      <div class="preview-actions">
+        <button type="button" class="quiet-button${fixed ? ' quiet-button-solid' : ''}" data-action="row-ok">${fixed ? 'Done' : (issues.some(function (i) { return i.kind === 'days' || i.kind === 'time'; }) ? 'Leave it for now' : 'It’s right')}</button>
+        <button type="button" class="text-button" data-action="row-edit">Edit everything</button>
+        <button type="button" class="text-button text-button-danger" data-action="row-remove">Remove</button>
+      </div>
+    </li>`;
+}
+
+// 没问题的行：只占一行
+// hideMissingRoom：整份文件都没有教室时，每一行都写 "No room listed" 只是噪音，不写
+function renderGoodRow(row, hideMissingRoom) {
+  return `
+    <li class="preview-row good" data-row="${row.key}">
+      <button type="button" class="good-main" data-action="row-edit">
+        <span class="good-when">${escapeHtml(shortWhen(row)) || '—'}</span>
+        <span class="good-name" translate="no">${escapeHtml([row.course, row.section].filter(Boolean).join(' ') || row.title)}</span>
+        ${hideMissingRoom && !rowLocation(row) && !row.locationText ? '' : `<span class="good-where">${rowWhere(row)}</span>`}
+      </button>
+      <button type="button" class="link-button" data-action="row-remove" aria-label="Remove ${escapeAttr(row.course || row.title)}">✕</button>
+    </li>`;
+}
+
+// 展开改全部：和编辑卡片一样的输入框，再加一个地点
+function renderPreviewEditor(row) {
+  return `
+    <li class="preview-row editing" data-row="${row.key}">
+      ${renderDetailFields(row)}
+      <label class="field">Room
+        <input type="search" class="f-location" list="place-options" value="${escapeAttr(row.locationText)}" placeholder="e.g. CAS 211 (leave empty if not listed)" translate="no">
+      </label>
+      <div class="preview-actions">
+        <button type="button" class="small-button" data-action="row-done">Done</button>
+        <button type="button" class="link-button" data-action="row-remove">Remove</button>
+      </div>
+    </li>`;
+}
+
+// 导入预览画在哪里：要核对的（有 rows）在页面中间的弹窗里；只问"加进哪一份"的小卡片在侧栏里
+function importRoot() {
+  const pending = myClasses.pendingImport;
+  return pending && pending.rows ? document.getElementById('import-dialog') : document.getElementById('import-choice');
+}
+
+// "加进当前这份 / 另存一份"：已经有自己的课时才问
+function renderTargetChoice(pending, count, alreadyCount) {
+  if (!pending.askTarget) {
+    return '';
+  }
+  const current = escapeHtml(activeSchedule().name);
+  const target = pending.target || 'add';
+  const alreadyNote = alreadyCount > 0 ? ` <span class="option-note">${alreadyCount} already there</span>` : '';
+  // 一半以上都是现在没有的课：多半是另一份课表（Plan B、室友的），提醒一句
+  const looksDifferent = alreadyCount < count / 2 && target === 'add'
+    ? `<p class="hint import-hint">These look different from "${current}". A new schedule keeps the two apart.</p>`
+    : '';
+  return `
+    <div class="target-choice" role="radiogroup" aria-label="Where to add them">
+      <label class="target-option"><input type="radio" name="import-target" value="add" ${target === 'add' ? 'checked' : ''}><span>Add to "${current}"${alreadyNote}</span></label>
+      <label class="target-option"><input type="radio" name="import-target" value="new" ${target === 'new' ? 'checked' : ''}><span>Save as a new schedule</span></label>
+    </div>
+    <input type="text" id="import-name" class="import-name" maxlength="40" aria-label="New schedule name"
+      value="${escapeAttr(pending.suggestedName || nextScheduleName())}" ${target === 'new' ? '' : 'hidden'}>
+    ${looksDifferent}`;
+}
+
+// 显示导入预览（弹窗）/ "加进哪一份"的选择卡片（侧栏）；没有要选的时候都清空
 function renderImportChoice() {
   const box = document.getElementById('import-choice');
+  const dialog = document.getElementById('import-dialog');
   const pending = myClasses.pendingImport;
+  if (!pending || !pending.rows) {
+    if (dialog.open) {
+      dialog.close();
+    }
+    dialog.innerHTML = '';
+  }
   if (!pending) {
     box.innerHTML = '';
     return;
   }
-  const current = escapeHtml(activeSchedule().name);
-  const alreadyNote = pending.already > 0
-    ? `<span class="option-note">${pending.already} of them ${pending.already === 1 ? 'is' : 'are'} already there</span>`
-    : '';
-  // 一半以上都是现在没有的课：多半是另一份课表（Plan B、室友的），提醒一句
-  const looksDifferent = pending.already < pending.count / 2
-    ? `<p class="hint import-hint">These look like different classes than "${current}". Saving them as a new schedule keeps the two apart.</p>`
-    : '';
+  const root = importRoot();
+  keepOpenRowInputs(root);
+  // 保留用户已经选的"加进哪一份"和新名字（重画时不要跳回默认）
+  const chosen = root.querySelector('input[name="import-target"]:checked');
+  const typedName = root.querySelector('#import-name');
+  if (chosen) {
+    pending.target = chosen.value;
+  }
+  if (typedName) {
+    pending.suggestedName = typedName.value;
+  }
+
+  if (pending.rows) {
+    box.innerHTML = '';
+    renderImportDialog(pending, dialog);
+    return;
+  }
+
+  // 不用核对（比如分享链接）：侧栏里一张小卡片，只问加进哪一份
   box.innerHTML = `
     <div class="import-choice">
       <strong>✓ Found ${pending.count} ${pending.count === 1 ? 'class' : 'classes'} in ${escapeHtml(pending.source)}</strong>
-      <label class="location-option">
-        <input type="radio" name="import-target" value="add" checked>
-        <span>Add to "${current}" ${alreadyNote}</span>
-      </label>
-      <label class="location-option">
-        <input type="radio" name="import-target" value="new">
-        <span>Save as a new schedule:
-          <input type="text" id="import-name" maxlength="40" value="${escapeAttr(pending.suggestedName || nextScheduleName())}">
-        </span>
-      </label>
-      ${looksDifferent}
+      ${renderTargetChoice(pending, pending.count, pending.already)}
       <div class="import-actions">
         <button type="button" class="primary-button" data-action="import-done">Done</button>
         <button type="button" class="link-button" data-action="import-cancel">Cancel</button>
@@ -1528,23 +2338,342 @@ function renderImportChoice() {
     </div>`;
 }
 
-function handleImportChoiceClick(event) {
-  const button = event.target.closest('button[data-action]');
-  if (!button || !myClasses.pendingImport) {
+// 来源的名字给人看：手机存的截图名常是一长串乱码（"08c6ec4d178d….jpg"、"IMG_4821.PNG"），不如直接说"your screenshot"
+function friendlySource(source) {
+  const name = source.replace(/^"|"$/g, '');
+  if (/^[0-9a-f-]{16,}\.\w+$/i.test(name) || /^(IMG|image|photo)[\s_-]?[\d\s_.:-]*\.\w+$/i.test(name) || /^(Screenshot|Screen Shot|截屏|屏幕截图)/i.test(name)) {
+    return 'your screenshot';
+  }
+  return name.length > 32 ? `"${name.slice(0, 28)}…"` : source;
+}
+
+// 导入预览弹窗：左边（手机上是上面）是这一周的课表，右边是要看一眼的课和其他课，底部是"添加"
+// 弹窗不占满屏幕：四周露出变暗的页面，让人知道还在同一个网页里，关掉就回到原来的地方
+function renderImportDialog(pending, dialog) {
+  // 删掉的行不真的丢掉：收进最下面的 "Removed"，随时可以放回来
+  const rows = pending.rows.filter(function (r) { return !r.removed; });
+  const removed = pending.rows.filter(function (r) { return r.removed; });
+  const lastRemoved = removed.find(function (r) { return r.key === pending.lastRemoved; });
+  rows.forEach(function (row) {
+    row.already = myClasses.items.some(function (item) { return !item.draft && sameMeeting(item, row); });
+  });
+  const count = rows.length;
+  const alreadyCount = rows.filter(function (r) { return r.already; }).length;
+  const courses = new Set(rows.map(function (r) { return (r.course || r.title).toUpperCase(); })).size;
+  const editing = rows.filter(function (r) { return r.open; });
+  // 正在改的可疑行（fixing）留在原地，直到用户点 Done，免得改了一个星期，那一行就跳走了
+  const isIssue = function (r) { return !r.open && (r.fixing || needsLook(r, rows)); };
+  const issues = rows.filter(isIssue);
+  const good = rows.filter(function (r) { return !r.open && !isIssue(r); });
+
+  // 整张截图的提醒：星期是推算 / 猜的
+  let notes = '';
+  if (pending.dateYear) {
+    notes += `<p class="import-note">📅 Your screenshot shows dates, not weekdays, so we worked out the days (assuming ${pending.dateYear}).</p>`;
+  }
+  if (pending.guessed.length > 0) {
+    notes += `<p class="import-note">📅 A day heading was cut off, so we guessed ${escapeHtml(pending.guessed.join(', '))} for some classes.</p>`;
+  }
+  // 自动统一过的课名：说出来，用户才知道网站改了什么（在行里还能再改）
+  const fixes = (pending.titleReport ? pending.titleReport.fixed : []).filter(function (f, i, all) {
+    return all.findIndex(function (g) { return g.from === f.from && g.to === f.to; }) === i;
+  });
+  if (fixes.length > 0) {
+    notes += `<p class="import-note">✏️ Fixed ${fixes.length === 1 ? 'a misread name' : 'misread names'}: ${fixes.map(function (f) {
+      return `${keepOriginal(escapeHtml(f.from))} → ${keepOriginal(escapeHtml(f.to))}`;
+    }).join(', ')}.</p>`;
+  }
+  pending.errors.forEach(function (e) {
+    notes += `<p class="import-note">${escapeHtml(e)}</p>`;
+  });
+  const shot = pending.images && pending.images.length > 0
+    ? `<details class="source-shot"><summary>Compare with your screenshot</summary>${pending.images.map(function (url) { return `<img src="${url}" alt="Your uploaded schedule">`; }).join('')}</details>`
+    : '';
+
+  const allGood = issues.length === 0 && editing.length === 0;
+  // 还没有教室的课（按课号算）：添加以后紧接着选楼，所以这一步只核对星期和时间
+  const noRoomCourses = new Set(rows.filter(function (r) { return !rowLocation(r); })
+    .map(function (r) { return (r.course || r.title).toUpperCase(); })).size;
+  const noRoomAll = noRoomCourses > 0 && rows.every(function (r) { return !rowLocation(r); });
+  // 刚删掉一行：最上面一条提示，可以马上撤销
+  const undoBar = lastRemoved
+    ? `<div class="undo-bar" role="status"><span>Removed <strong translate="no">${escapeHtml([lastRemoved.course, lastRemoved.section].filter(Boolean).join(' ') || lastRemoved.title)}</strong></span>
+        <button type="button" class="undo-bar-button" data-action="row-restore" data-row="${lastRemoved.key}">Undo</button></div>`
+    : '';
+  const removedHtml = removed.length > 0
+    ? `<details class="good-list removed-list"><summary class="preview-heading">Removed <span class="count-pill count-pill-quiet">${removed.length}</span></summary>
+        <ul class="preview-list">${removed.map(function (r) {
+          return `<li class="preview-row removed" data-row="${r.key}">
+              <span class="removed-name" translate="no">${escapeHtml([r.course, r.section].filter(Boolean).join(' ') || r.title)}</span>
+              <span class="removed-when">${escapeHtml(shortWhen(r))}</span>
+              <button type="button" class="quiet-button" data-action="row-restore">Restore</button>
+            </li>`;
+        }).join('')}</ul></details>`
+    : '';
+  const side = `
+    ${undoBar}
+    ${allGood && noRoomCourses === 0 ? '<p class="all-good">Everything looks right. Give the calendar one glance, then add.</p>' : ''}
+    ${allGood && noRoomCourses > 0 ? `<div class="next-step">
+        <p class="next-step-title">Days and times look right</p>
+        <p class="next-step-text">Next, pick where ${noRoomCourses === 1 ? 'your course meets' : `your ${noRoomCourses} courses meet`}. ${noRoomAll ? 'This file doesn’t list rooms.' : 'Some rooms are missing.'} It takes a few taps.</p>
+      </div>` : ''}
+    ${editing.length > 0 ? '<ul class="preview-list">' + editing.map(renderPreviewEditor).join('') + '</ul>' : ''}
+    ${issues.length > 0 ? `<h3 class="preview-heading issue-heading">Needs a quick look <span class="count-pill">${issues.length}</span></h3>
+      <ul class="preview-list">${issues.map(function (r) { return renderIssueRow(r, rows); }).join('')}</ul>` : ''}
+    ${good.length > 0 ? `<details class="good-list"${allGood ? ' open' : ''}>
+      <summary class="preview-heading">${noRoomCourses > 0 ? 'Days &amp; times look right' : 'Looks right'} <span class="count-pill count-pill-quiet">${good.length}</span></summary>
+      <ul class="preview-list">${good.map(function (r) { return renderGoodRow(r, noRoomAll); }).join('')}</ul></details>` : ''}
+    <button type="button" class="add-row-button" data-action="row-add">+ Add a class time we missed</button>
+    ${removedHtml}`;
+
+  // 不改会怎样：没有星期或时间的课，不会出现在课间步行里
+  const incomplete = rows.filter(function (r) { return r.start == null || r.days.length === 0; }).length;
+  const open = issues.filter(function (r) { return needsLook(r, rows); }).length;
+  let footNote = '';
+  if (incomplete > 0) {
+    footNote = `${incomplete} without a day or time won’t show in your walks until you add one.`;
+  } else if (open > 0) {
+    footNote = `${open} still flagged. You can also fix ${open === 1 ? 'it' : 'them'} later in My classes.`;
+  } else if (noRoomCourses > 0) {
+    footNote = 'Step 1 of 2: days and times. Next: rooms.';
+  }
+
+  // 重画时不要让内容跳动：记下两块可以滚动的地方
+  const scroll = ['.dlg-body', '.dlg-side', '.dlg-week'].map(function (sel) {
+    const el = dialog.querySelector(sel);
+    return el ? el.scrollTop : 0;
+  });
+  const focused = document.activeElement && dialog.contains(document.activeElement) ? document.activeElement : null;
+  const focusKey = focused ? [focused.closest('[data-row]') && focused.closest('[data-row]').dataset.row, focused.className, focused.value] : null;
+
+  dialog.innerHTML = `
+    <div class="dlg-head">
+      <div class="dlg-title">
+        <h2 id="import-dialog-title">Check your classes</h2>
+        <p class="dlg-lead">We found <strong>${courses} ${courses === 1 ? 'course' : 'courses'}</strong> and <strong>${count} class ${count === 1 ? 'time' : 'times'}</strong> in <span translate="no">${escapeHtml(friendlySource(pending.source))}</span>. Does your week look like this?</p>
+      </div>
+      <button type="button" class="dlg-close" data-action="import-cancel" aria-label="Close without adding">×</button>
+    </div>
+    <div class="dlg-body">
+      <section class="dlg-week" aria-label="Your week as we read it">
+        ${renderMiniWeek(rows, pending.focus)}
+        ${notes}
+        ${shot}
+      </section>
+      <section class="dlg-side" aria-label="Classes">${side}</section>
+    </div>
+    <div class="dlg-foot">
+      ${renderTargetChoice(pending, count, alreadyCount)}
+      <div class="dlg-foot-row">
+        <p class="import-foot-note">${footNote}</p>
+        <button type="button" class="ghost-button" data-action="import-cancel">Cancel</button>
+        <button type="button" class="primary-button" data-action="import-done" ${count === 0 ? 'disabled' : ''}>${count === 0 ? 'Nothing to add' : (noRoomCourses > 0 ? 'Next: add rooms →' : `Add ${count} class ${count === 1 ? 'time' : 'times'}`)}</button>
+      </div>
+    </div>`;
+  ['.dlg-body', '.dlg-side', '.dlg-week'].forEach(function (sel, i) {
+    const el = dialog.querySelector(sel);
+    if (el) {
+      el.scrollTop = scroll[i];
+    }
+  });
+  if (!dialog.open) {
+    dialog.showModal();
+    dialog.querySelector('.dlg-body').scrollTop = 0;
+  }
+  // 重画前光标在哪个输入框，重画后放回去（比如在可疑行里刚点了一个星期）
+  if (focusKey) {
+    const again = Array.from(dialog.querySelectorAll('input, button')).find(function (el) {
+      const row = el.closest('[data-row]');
+      return (row ? row.dataset.row : undefined) === focusKey[0] && el.className === focusKey[1] && el.value === focusKey[2];
+    });
+    if (again) {
+      again.focus({ preventScroll: true });
+    }
+  }
+}
+
+// 可疑行里直接改的那一项（星期、时间、课名）：改完马上记下，重画卡片（问题解决了的行会挪到"没问题"里）
+function handleImportChange(event) {
+  const pending = myClasses.pendingImport;
+  const li = event.target.closest('.preview-row.issue');
+  if (event.target.name === 'import-target') {
+    renderImportChoice();
+    if (event.target.value === 'new') {
+      const name = document.getElementById('import-name');
+      name.focus();
+      name.select();
+    }
     return;
   }
-  const pending = myClasses.pendingImport;
-  myClasses.pendingImport = null;
-  if (button.dataset.action === 'import-done') {
-    const target = document.querySelector('input[name="import-target"]:checked').value;
-    logEvent('import-choice-' + target);
-    const name = document.getElementById('import-name').value.trim().slice(0, 40) || nextScheduleName();
-    renderImportChoice();
-    applyImport(pending.results, target, name);
+  if (!pending || !pending.rows || !li) {
+    return;
+  }
+  const row = pending.rows.find(function (r) { return r.key === Number(li.dataset.row); });
+  const t = event.target;
+  if (t.classList.contains('q-day')) {
+    row.days = sortDays(Array.from(li.querySelectorAll('.q-day:checked')).map(function (i) { return i.value; }));
+  } else if (t.classList.contains('q-title')) {
+    row.title = t.value.replace(/\s+/g, ' ').trim() || row.course;
+  } else if (t.classList.contains('q-start') || t.classList.contains('q-end')) {
+    const start = fromTimeValue(li.querySelector('.q-start').value);
+    const end = fromTimeValue(li.querySelector('.q-end').value);
+    // 开始、结束都填好、而且结束比开始晚，才算改好了
+    if (start === null || end === null || end <= start) {
+      return;
+    }
+    Object.assign(row, { start: start, end: end, time: formatTimeRange({ start: start, end: end }) });
   } else {
-    logEvent('import-choice-cancel');
+    return;
+  }
+  row.fixing = true;
+  renderImportChoice();
+}
+
+// 预览改好了：整理成和读文件一样的结果，再放进课表
+// 输出：{ located, unlocated }
+function previewToResult(rows) {
+  const meetings = rows.map(function (row) {
+    const location = rowLocation(row);
+    return {
+      title: row.title || row.course, course: row.course, section: row.section,
+      start: row.start, end: row.end, time: row.time, days: sortDays(row.days),
+      place: location ? location.place : null,
+      code: location ? (location.place.code || '') : '',
+      room: location ? location.room : '',
+      noRoom: !location && !row.locationText && Boolean(row.noRoom)
+    };
+  });
+  return {
+    located: meetings.filter(function (m) { return m.place; }),
+    unlocated: meetings.filter(function (m) { return !m.place; })
+  };
+}
+
+function handleImportChoiceClick(event) {
+  const button = event.target.closest('button[data-action]');
+  const pending = myClasses.pendingImport;
+  if (!button || !pending) {
+    return;
+  }
+  const action = button.dataset.action;
+  const li = button.closest('.preview-row');
+  const status = document.getElementById('schedule-status');
+
+  // 预览里的一行：展开改、改好收起、删掉、补一行
+  // 同一门课两种拼法，用户选了一个：这门课的所有时段都用它
+  if (action === 'pick-title') {
+    const chosenRow = pending.rows.find(function (r) { return r.key === Number(li.dataset.row); });
+    pending.rows.forEach(function (r) {
+      if (r.course === chosenRow.course && r.titleOptions) {
+        r.title = button.dataset.title;
+        delete r.titleOptions;
+      }
+    });
+    pending.lastRemoved = null;
     renderImportChoice();
-    document.getElementById('schedule-status').textContent = 'Nothing was added.';
+    return;
+  }
+
+  // 小周课表里点一个格子：跳到那一行；没问题的行在收起的列表里，先展开
+  if (action === 'row-focus') {
+    pending.focus = Number(button.dataset.row);
+    renderImportChoice(); // 课表里点的那一格加粗
+    const target = importRoot().querySelector(`.preview-row[data-row="${button.dataset.row}"]`);
+    if (target) {
+      const list = target.closest('details');
+      if (list) {
+        list.open = true;
+      }
+      target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      target.classList.remove('flash');
+      void target.offsetWidth; // 重新播放闪一下的动画
+      target.classList.add('flash');
+    }
+    return;
+  }
+
+  if (action === 'row-edit' || action === 'row-remove' || action === 'row-done' || action === 'row-add' || action === 'row-ok' || action === 'row-restore') {
+    keepOpenRowInputs(importRoot());
+    const key = li ? li.dataset.row : button.dataset.row;
+    const row = key ? pending.rows.find(function (r) { return r.key === Number(key); }) : null;
+    pending.lastRemoved = null; // "刚删掉"的提示只在删完的下一步之前显示
+    if (action === 'row-restore') {
+      row.removed = false;
+    } else if (action === 'row-ok') {
+      row.ok = true;
+      row.fixing = false;
+    } else if (action === 'row-edit') {
+      row.open = true;
+    } else if (action === 'row-remove') {
+      Object.assign(row, { removed: true, open: false, fixing: false });
+      pending.lastRemoved = row.key;
+    } else if (action === 'row-done') {
+      if (!closePreviewRow(li)) {
+        return;
+      }
+      row.fixing = false;
+      row.ok = true; // 用户自己逐项看过、改过了
+    } else {
+      logEvent('import-row-add');
+      pending.rows.push({
+        key: pending.nextRow++, title: '', course: '', section: '', start: null, end: null, time: '', days: [],
+        place: null, code: '', room: '', noRoom: false, locationText: '', readLocationText: '', open: true
+      });
+    }
+    renderImportChoice();
+    if (action === 'row-add' || action === 'row-edit') {
+      const opened = importRoot().querySelector(`.preview-row[data-row="${action === 'row-add' ? pending.nextRow - 1 : row.key}"]`);
+      if (opened) {
+        opened.scrollIntoView({ block: 'nearest' });
+        opened.querySelector('.f-title').focus();
+      }
+    }
+    return;
+  }
+
+  if (action === 'import-cancel') {
+    logEvent('import-choice-cancel');
+    dropPendingImport();
+    renderImportChoice();
+    flashStatus('Nothing was added.');
+    return;
+  }
+
+  // import-done：还展开着的行先检查、收起；有问题就停在那一行
+  if (pending.rows) {
+    const open = Array.from(importRoot().querySelectorAll('.preview-row.editing'));
+    for (const openLi of open) {
+      if (!closePreviewRow(openLi)) {
+        return;
+      }
+    }
+  }
+  const checked = document.querySelector('input[name="import-target"]:checked');
+  const target = checked ? checked.value : 'add';
+  if (pending.askTarget) {
+    logEvent('import-choice-' + target);
+  }
+  const nameInput = document.getElementById('import-name');
+  const name = (nameInput ? nameInput.value.trim().slice(0, 40) : '') || nextScheduleName();
+  const kept = pending.rows ? pending.rows.filter(function (r) { return !r.removed; }) : null;
+  const results = pending.rows ? [previewToResult(kept)] : pending.results;
+  dropPendingImport();
+  renderImportChoice();
+  applyImport(results, target, name);
+
+  // 说清楚这次加了什么、还差什么
+  if (pending.rows) {
+    const added = kept.length;
+    const noRoom = results[0].unlocated.length;
+    const parts = [`Added ${added} class ${added === 1 ? 'time' : 'times'} to "${activeSchedule().name}".`];
+    if (target === 'new') {
+      parts.push('Switch between schedules at the top.');
+    }
+    flashStatus(parts.concat(pending.errors).join(' '));
+    // 有课没教室：接着弹出"一次补完教室"，不用再回列表里一张张找
+    if (noRoom > 0 && coursesNeedingRooms().length > 0) {
+      openRoomsDialog(added);
+    }
   }
 }
 
@@ -1655,6 +2784,7 @@ function initMyClasses(placeIndex) {
 
   document.getElementById('schedule-text-button').addEventListener('click', function () {
     const text = document.getElementById('schedule-text').value;
+    document.getElementById('schedule-status').textContent = ''; // 上一次的结果（比如"没找到"）先清掉
     removeSampleClasses();
     hideOcrTip();
     offerImport([parseSchedule(textToLines(text), placeIndex, knownCourses())], 'your text');
@@ -1673,6 +2803,27 @@ function initMyClasses(placeIndex) {
   // 导入时"加进当前这份 / 另存一份"的选择卡片
   const importBox = document.getElementById('import-choice');
   importBox.addEventListener('click', handleImportChoiceClick);
+  importBox.addEventListener('change', handleImportChange);
+  // 导入预览弹窗：和侧栏卡片一样的按钮；按 Esc 等于 Cancel
+  const importDialog = document.getElementById('import-dialog');
+  importDialog.addEventListener('click', handleImportChoiceClick);
+  importDialog.addEventListener('change', handleImportChange); // 可疑行里直接改星期、时间、课名
+  // 一次补完教室的弹窗；按 Esc 等于 Cancel
+  const roomsDialog = document.getElementById('rooms-dialog');
+  roomsDialog.addEventListener('click', handleRoomsClick);
+  roomsDialog.addEventListener('input', handleRoomsInput);
+  roomsDialog.addEventListener('change', handleRoomsInput);
+  roomsDialog.addEventListener('cancel', function (event) {
+    event.preventDefault();
+    closeRoomsDialog();
+  });
+  importDialog.addEventListener('cancel', function (event) {
+    event.preventDefault();
+    const cancel = importDialog.querySelector('[data-action="import-cancel"]');
+    if (cancel) {
+      cancel.click();
+    }
+  });
   // 点名字输入框、或者在里面打字，就是想另存一份：自动选上那一项
   // （输入框放在 label 里面，点它不会自动选上 label 里的圆圈，要自己选）
   ['focusin', 'click', 'input'].forEach(function (type) {
@@ -1684,6 +2835,15 @@ function initMyClasses(placeIndex) {
   });
 
   document.getElementById('sample-button').addEventListener('click', loadSampleSchedule);
+  document.getElementById('manual-add-button').addEventListener('click', startManualClass);
+  // "Paste text"：展开粘贴框，光标直接放进去
+  document.getElementById('paste-toggle').addEventListener('click', function () {
+    const box = document.getElementById('schedule-paste');
+    box.open = !box.open;
+    if (box.open) {
+      document.getElementById('schedule-text').focus();
+    }
+  });
 
   const list = document.getElementById('schedule-list');
   list.addEventListener('click', handleListClick);
@@ -1740,7 +2900,7 @@ function initMyClasses(placeIndex) {
     const count = myClasses.items.length;
     if (count > 0) {
       const status = document.getElementById('schedule-status');
-      status.textContent = `Welcome back: loaded ${count} saved ${count === 1 ? 'class' : 'classes'}. ` + status.textContent;
+      flashStatus((`Welcome back: loaded ${count} saved ${count === 1 ? 'class' : 'classes'}. ` + status.textContent).trim(), 6000);
     }
   }
 

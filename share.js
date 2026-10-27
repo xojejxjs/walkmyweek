@@ -195,7 +195,7 @@ async function importSharedLink(placeIndex) {
     located: classes.filter(function (c) { return c.status === 'confirmed' && c.place; }),
     unlocated: classes.filter(function (c) { return !(c.status === 'confirmed' && c.place) && c.status !== 'skipped'; })
   };
-  offerImport([result], 'the link');
+  offerImport([result], 'the link', { review: false }); // 链接里的课是整理好的，不用再核对
   // 要选"另存一份"时，名字默认用对方课表的名字（比如朋友叫它 "Alex"）；和这里已有的名字重复就不用
   const sentName = String(data.n || '').slice(0, 40);
   const taken = myClasses.schedules.some(function (s) { return s.name.toLowerCase() === sentName.toLowerCase(); });

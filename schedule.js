@@ -310,14 +310,43 @@ function sortDays(days) {
   return DAY_ORDER.filter(function (d) { return days.includes(d); });
 }
 
-// 日历表头 → 星期几："MON" → 'Mon'；"SEP 28" → 算出这一天是周几（用今年的年份）
-function headerToDay(label) {
+// 日历表头 → 星期几："MON" → 'Mon'；"SEP 28" → 算出这一天是周几（year 不传就用今年）
+function headerToDay(label, year) {
   const parts = label.split(' ');
   if (parts.length === 1) {
     return DAY_NAMES.find(function (d) { return d.toUpperCase() === label; }) || '';
   }
-  const date = new Date(new Date().getFullYear(), MONTHS.indexOf(parts[0]), Number(parts[1]));
-  return DAY_NAMES[date.getDay()];
+  return DAY_NAMES[headerDate(label, year || new Date().getFullYear()).getUTCDay()];
+}
+
+// "SEP 28" + 年份 → 日期（用 UTC，免得夏令时让"相差几天"算错）
+function headerDate(label, year) {
+  const parts = label.split(' ');
+  return new Date(Date.UTC(year, MONTHS.indexOf(parts[0]), Number(parts[1])));
+}
+
+// 表头只有日期、没有星期（"SEP 7"）时，截图上没写年份：在去年、今年、明年里挑一个
+// 课表一般是周一到周五：哪一年让这些日期落在工作日上最多，就用哪一年；一样多时优先今年
+// 输出：年份；表头里没有日期时是 null
+function guessHeaderYear(columns) {
+  const dated = columns.filter(function (c) { return c.label.includes(' '); });
+  if (dated.length === 0) {
+    return null;
+  }
+  const now = new Date().getFullYear();
+  let best = now;
+  let bestScore = -1;
+  [now, now - 1, now + 1].forEach(function (year) {
+    const score = dated.filter(function (c) {
+      const day = headerDate(c.label, year).getUTCDay();
+      return day >= 1 && day <= 5;
+    }).length;
+    if (score > bestScore) {
+      best = year;
+      bestScore = score;
+    }
+  });
+  return best;
 }
 
 // ===== 统一写法：类型 =====
@@ -476,8 +505,11 @@ function extractRooms(text, placeIndex) {
 // （不能只看有没有这个词：Wheelock 的楼宇代码 "WED" 会被误认成星期三）
 // 输出：[{ label: 'SEP 28', x: 572 }, ...]，按从左到右排好
 function findDayColumns(segments) {
-  const monthDay = new RegExp('^(' + MONTHS.join('|') + ')[A-Z]*\\.?\\s+(\\d{1,2})$', 'i');
-  const weekday = new RegExp('^(' + WEEKDAYS.join('|') + ')[A-Z]*\\.?(\\s+\\d{1,2}(/\\d{1,2})?)?$', 'i');
+  const monthDay = new RegExp('^(' + MONTHS.join('|') + ')[A-Z]*\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?$', 'i');
+  // 星期后面可以跟日期："MON 28"、"Mon 9/7"、"Monday, Sep 7"（有星期就用星期，最可靠）
+  const weekday = new RegExp('^(' + WEEKDAYS.join('|') + ')[A-Z]*\\.?,?(\\s+(\\d{1,2}(/\\d{1,2})?|(' + MONTHS.join('|') + ')[A-Z]*\\.?\\s+\\d{1,2}))?$', 'i');
+  // 只有数字日期："9/7"
+  const numeric = /^(\d{1,2})\/(\d{1,2})$/;
 
   const days = [];
   segments.forEach(function (segment) {
@@ -486,10 +518,13 @@ function findDayColumns(segments) {
     }
     const m = segment.text.match(monthDay);
     const w = segment.text.match(weekday);
+    const n = segment.text.match(numeric);
     if (m) {
-      days.push({ label: m[1].toUpperCase() + ' ' + m[2], x: segment.x, y: segment.y });
+      days.push({ label: m[1].toUpperCase() + ' ' + Number(m[2]), x: segment.x, y: segment.y });
     } else if (w) {
       days.push({ label: w[1].toUpperCase(), x: segment.x, y: segment.y });
+    } else if (n && Number(n[1]) >= 1 && Number(n[1]) <= 12 && Number(n[2]) >= 1 && Number(n[2]) <= 31) {
+      days.push({ label: MONTHS[Number(n[1]) - 1] + ' ' + Number(n[2]), x: segment.x, y: segment.y });
     }
   });
   days.sort(function (a, b) { return a.x - b.x; });
@@ -539,8 +574,72 @@ function segmentsBelow(segments, index) {
     .sort(function (a, b) { return a.y - b.y; });
 }
 
-// 这个片段在星期几：看它的横坐标离哪个表头日期最近
-function dayOf(segment, dayColumns) {
+// 表头 → "横坐标对应星期几"的规则
+// 有两个以上表头时，按列宽推算：某一列的表头没认出来（OCR 漏了），那一列的课也不会被算到隔壁那天
+// 输入：findDayColumns 的结果；anchorXs：课号的横坐标（只有一个表头时，用来判断课是不是分在好几列）
+// 输出：{ dayAt(x) → 'Mon' 或 ''，fromDates：星期是不是从日期推算的，year：推算用的年份，unsure：认不准星期 }
+function buildDayAxis(dayColumns, anchorXs, lineHeight) {
+  const axis = { fromDates: false, year: null, unsure: false, dayAt: function () { return ''; } };
+  if (dayColumns.length === 0) {
+    return axis;
+  }
+  // 有星期的表头最可靠，有的话只用它们；否则用日期
+  const named = dayColumns.filter(function (c) { return !c.label.includes(' '); });
+  const columns = named.length > 0 ? named : dayColumns;
+  const year = named.length > 0 ? null : guessHeaderYear(columns);
+  axis.fromDates = named.length === 0;
+  axis.year = year;
+  // 每个表头 → 一个"第几天"的数：星期用 0（周日）～6，日期用从 1970 年起的天数
+  const points = columns.map(function (c) {
+    const n = c.label.includes(' ')
+      ? Math.round(headerDate(c.label, year).getTime() / 86400000)
+      : DAY_NAMES.findIndex(function (d) { return d.toUpperCase() === c.label; });
+    return { x: c.x, n: n };
+  }).sort(function (a, b) { return a.x - b.x; });
+  const weekdayOf = function (n) {
+    // 1970-01-01 是周四；星期表头的数本来就是 0～6
+    return DAY_NAMES[(((axis.fromDates ? n + 4 : n) % 7) + 7) % 7];
+  };
+
+  // 只有一个表头：课都在这一列附近才用它；课分散在好几列，说明别的表头没认出来，宁可不填，让用户自己选
+  if (points.length === 1 || points.every(function (p) { return p.n === points[0].n; })) {
+    const spread = anchorXs.length > 0 ? Math.max.apply(null, anchorXs) - Math.min.apply(null, anchorXs) : 0;
+    if (spread > (lineHeight || 20) * 8) {
+      axis.unsure = true;
+      return axis;
+    }
+    axis.dayAt = function () { return weekdayOf(points[0].n); };
+    return axis;
+  }
+
+  // 列宽：相邻两个表头之间，每差一天隔多宽（取中位数，个别认错的表头影响不大）
+  const widths = [];
+  for (let i = 1; i < points.length; i++) {
+    const dn = points[i].n - points[i - 1].n;
+    if (dn > 0) {
+      widths.push((points[i].x - points[i - 1].x) / dn);
+    }
+  }
+  if (widths.length === 0) {
+    axis.unsure = true; // 表头顺序和日期对不上（比如认错了），不要乱猜
+    return axis;
+  }
+  widths.sort(function (a, b) { return a - b; });
+  const width = widths[Math.floor(widths.length / 2)];
+  const first = points[0];
+  const last = points[points.length - 1];
+  axis.dayAt = function (x) {
+    // 只认表头范围内（左右各多半列）的课
+    if (x < first.x - width * 0.75 || x > last.x + width * 0.75) {
+      return '';
+    }
+    return weekdayOf(first.n + Math.round((x - first.x) / width));
+  };
+  return axis;
+}
+
+// 这个片段在星期几
+function dayOf(segment, dayColumns, axis) {
   if (dayColumns.length === 0 || segment.x === null) {
     return '';
   }
@@ -548,13 +647,7 @@ function dayOf(segment, dayColumns) {
   if (segment.y < dayColumns[0].y) {
     return '';
   }
-  let best = dayColumns[0];
-  dayColumns.forEach(function (d) {
-    if (Math.abs(d.x - segment.x) < Math.abs(best.x - segment.x)) {
-      best = d;
-    }
-  });
-  return headerToDay(best.label);
+  return axis.dayAt(segment.x);
 }
 
 // ===== 两种版面的读法 =====
@@ -569,6 +662,10 @@ function parseBlocks(segments, placeIndex, knownCourses) {
   };
   const isAnchor = function (s) { return anchorOf(s.text) !== null; };
   const meetings = [];
+  // 表头在下面的课号都算：每个课号的横坐标、行高，用来判断只认出一个表头时课是不是分在好几列
+  const anchors = segments.filter(function (s) { return s.x !== null && isAnchor(s) && (dayColumns.length === 0 || s.y > dayColumns[0].y); });
+  const axis = buildDayAxis(dayColumns, anchors.map(function (s) { return s.x; }),
+    anchors.length > 0 ? anchors[0].h : 20);
 
   segments.forEach(function (segment, i) {
     const found = anchorOf(segment.text);
@@ -599,8 +696,10 @@ function parseBlocks(segments, placeIndex, knownCourses) {
         const close = segment.y === null || Math.abs(above.y - lower.y) < segment.h * 2.5;
         // 同一个格子里的字是左对齐的；左边差太多，就是别的东西（比如时间轴、表头）
         const aligned = segment.x0 === null || Math.abs(above.x0 - segment.x0) < segment.h * 1.5;
+        // 上一门课的教室（"CAS 211"）、星期行也不是课名
         if (!close || !aligned || isAnchor(above) || parseTimeRange(above.text) ||
-            findLocation(above.text, placeIndex) || /:\s*$/.test(above.text) || isDayHeader(above.text)) {
+            findLocation(above.text, placeIndex) || LOCATION_PATTERN.test(above.text) ||
+            /:\s*$/.test(above.text) || isDayHeader(above.text) || isDaysOnly(above.text).length > 0) {
           break;
         }
         parts.unshift(above.text);
@@ -623,8 +722,13 @@ function parseBlocks(segments, placeIndex, knownCourses) {
         time = parseTimeRange(text);
         if (time) {
           // 和时间写在同一行的 "MoWeFr" 才算星期（别处的 "We"、"Th" 可能只是普通单词）
-          days = sortDays([].concat.apply([], text.split(/\s+/).map(parseDayCodes)));
+          const sameLine = sortDays([].concat.apply([], text.split(/\s+/).map(parseDayCodes)));
+          days = sameLine.length > 0 ? sameLine : days;
         }
+      }
+      // 单独一行的星期（"Monday"、"Days: Mon, Wed"）
+      if (days.length === 0 && isDaysOnly(text).length > 0) {
+        days = isDaysOnly(text);
       }
       if (!location) {
         location = findLocation(text, placeIndex);
@@ -642,10 +746,12 @@ function parseBlocks(segments, placeIndex, knownCourses) {
         }
       }
     }
+    let dayFromDate = false;
     if (days.length === 0) {
-      const day = dayOf(segment, dayColumns);
+      const day = dayOf(segment, dayColumns, axis);
       if (day) {
         days = [day];
+        dayFromDate = axis.fromDates;
       }
     }
 
@@ -661,7 +767,9 @@ function parseBlocks(segments, placeIndex, knownCourses) {
       section: section,
       time: time,
       days: days,
-      location: location
+      location: location,
+      dayFromDate: dayFromDate,
+      dateYear: dayFromDate ? axis.year : null
     });
   });
   return meetings;
@@ -690,11 +798,31 @@ function groupRows(segments) {
   });
 }
 
+// 一行字像不像课名：不是标签、时间、课号、教室、星期，长度也合适
+// 用在"课名单独写在课号上面一行"的时候（比如粘贴的 "Intro to DS with Python" / "CDSDS 110 (LEC)"）
+function looksLikeTitle(text, placeIndex) {
+  const t = (text || '').trim();
+  return t.length >= 3 && t.length <= 80 && /[A-Za-z]{3}/.test(t) && !LABEL.test(t) &&
+    findTimeTokens(t).length === 0 && !COURSE_CODE.test(t) && !LOCATION_PATTERN.test(t) &&
+    isDaysOnly(t).length === 0 && !findLocation(t, placeIndex);
+}
+
+// 一整行都是星期吗（"Monday"、"MoWeFr"、"Mon, Wed"、"Days: Tue/Thu"）
+// 输出：星期数组；不是的话是空数组
+function isDaysOnly(text) {
+  const t = text.replace(/^\s*(days|meets)\s*:\s*/i, '').trim();
+  const tokens = t.split(/[\s,/&]+/).filter(Boolean);
+  if (tokens.length === 0 || !tokens.every(function (tok) { return parseDays(tok).length > 0; })) {
+    return [];
+  }
+  return parseDays(t);
+}
+
 function parseLabeled(rows, placeIndex, knownCourses) {
   // 先按顺序读：遇到课号就开始一门新课，后面的标签都属于这门课
   const entries = [];
   let current = null;
-  rows.forEach(function (row) {
+  rows.forEach(function (row, i) {
     const label = row.match(LABEL);
     if (!label) {
       if (current && !findCourse(row, knownCourses)) {
@@ -707,9 +835,12 @@ function parseLabeled(rows, placeIndex, knownCourses) {
       // 详情页里只认完整课号（CASMA 123）；简写（MA123）一般只是在说明文字里提到
       const found = findCourse(row, knownCourses);
       if (found && !found.short) {
+        // 课名：课号同一行前面的字；没有的话，看上一行像不像课名
+        const sameRow = cleanTitle(row.slice(0, found.index).split('   ').pop());
+        const above = i > 0 && looksLikeTitle(rows[i - 1], placeIndex) ? cleanTitle(rows[i - 1]) : '';
         current = {
           course: found.course,
-          title: cleanTitle(row.slice(0, found.index).split('   ').pop()) || found.course,
+          title: sameRow || above || found.course,
           section: parseType(row.slice(found.index + found.length)),
           fields: {},
           otherRows: [] // 不带 "Room:" 这种标签的行：有的课表只写地址，没有标签
@@ -739,16 +870,50 @@ function parseLabeled(rows, placeIndex, knownCourses) {
     }
 
     // 写法 2：分开的 "Days: MoWeFr  Th"、"Start: 9:05AM  6:30PM"、"End: 9:55AM  8:30PM"
+    // 没有 "Start:" 时，时间可能写在 "Days:" 同一行（"Days: Monday 9:00 - 10:00 am"），或者单独一行（"9:00 - 10:00 am"）
+    const looseTime = function () {
+      const sameLine = parseTimeRange(f.days || '');
+      if (sameLine) {
+        return sameLine;
+      }
+      for (const row of entry.otherRows) {
+        const time = parseTimeRange(row);
+        if (time) {
+          return time;
+        }
+      }
+      return null;
+    };
     if (patterns.length === 0 && (f.days || f.start)) {
-      const dayGroups = (f.days || '').split(/\s+/).map(parseDayCodes).filter(function (d) { return d.length > 0; });
+      let dayGroups = (f.days || '').split(/\s+/).map(parseDayCodes).filter(function (d) { return d.length > 0; });
+      // 不是 "MoWeFr" 这种写法：按完整的英文星期读（"Monday"、"Mon, Wed"），算一组
+      if (dayGroups.length === 0 && parseDays(f.days || '').length > 0) {
+        dayGroups = [parseDays(f.days)];
+      }
       const starts = findTimeTokens(f.start || '');
       const ends = findTimeTokens(f.end || '');
       const count = Math.max(dayGroups.length, starts.length, 1);
+      const fallback = starts.length === 0 ? looseTime() : null;
       for (let k = 0; k < count; k++) {
         patterns.push({
           days: sortDays(dayGroups[k] || []),
-          time: starts[k] ? resolveTimes(starts[k], ends[k] || null) : null
+          time: starts[k] ? resolveTimes(starts[k], ends[k] || null) : (k === 0 ? fallback : null)
         });
+      }
+    }
+    // 连 "Days:" 都没有：在这门课的其他行里找时间，和时间同一行（或单独一行）的星期
+    if (patterns.length === 0) {
+      for (const row of entry.otherRows) {
+        const time = parseTimeRange(row);
+        if (time) {
+          const days = sortDays([].concat.apply([], row.split(/\s+/).map(parseDayCodes)).concat(parseDays(row.replace(/\d.*$/, ''))));
+          patterns.push({ days: days, time: time });
+          break;
+        }
+      }
+      const dayRow = entry.otherRows.map(isDaysOnly).find(function (d) { return d.length > 0; });
+      if (patterns.length > 0 && patterns[0].days.length === 0 && dayRow) {
+        patterns[0].days = dayRow;
       }
     }
     if (patterns.length === 0) {
@@ -1060,6 +1225,24 @@ function aiClock(text) {
 // 输出：和 parseSchedule 一样的 { located, unlocated, guessedDays, fileLocations }
 // AI 只负责"看懂截图"；教室在哪栋楼，还是用网站自己的规则对（matchTableRoom），不靠 AI 猜
 function parseAiClasses(classes, placeIndex, knownCourses) {
+  // 表头只有日期时，AI 给的是日期（"09-07"）：所有课的日期放在一起挑年份，再算星期
+  const labels = [];
+  (classes || []).forEach(function (c) {
+    (c.dates || []).forEach(function (d) {
+      const m = /^(\d{2})-(\d{2})$/.exec(d);
+      if (m && Number(m[1]) >= 1 && Number(m[1]) <= 12) {
+        labels.push({ label: MONTHS[Number(m[1]) - 1] + ' ' + Number(m[2]), from: d });
+      }
+    });
+  });
+  const year = labels.length > 0 ? guessHeaderYear(labels) : null;
+  const daysFromDates = function (dates) {
+    return sortDays((dates || []).map(function (d) {
+      const found = labels.find(function (l) { return l.from === d; });
+      return found ? headerToDay(found.label, year) : '';
+    }).filter(Boolean));
+  };
+  let usedDates = false;
   const meetings = (classes || []).map(function (c) {
     const raw = String(c.course || '').toUpperCase();
     const found = findCourse(raw, knownCourses || []);
@@ -1077,14 +1260,106 @@ function parseAiClasses(classes, placeIndex, knownCourses) {
       course: course,
       section: parseType(c.type || ''),
       time: start === null ? null : { start: start, end: end },
-      days: sortDays(c.days || []),
+      days: (c.days || []).length > 0 ? sortDays(c.days) : (function () {
+        const days = daysFromDates(c.dates);
+        usedDates = usedDates || days.length > 0;
+        return days;
+      })(),
       location: location
     };
   });
   const result = buildResult(meetings);
   result.guessedDays = [];
   result.fileLocations = [];
+  result.dateYear = usedDates ? year : null;
   return result;
+}
+
+// ===== 同一门课、拼法差一点的课名 =====
+// 识别常把一个字母认错（"Linear Algebra" → "Linsar Algebra"）。同一个课号的几个时段（LEC / DIS / LAB）
+// 课名本来应该一样，所以拿它们互相比：差一两个字母，多半是认错了
+
+// 两段文字差几个字母（插入、删除、替换各算一次）
+function editDistance(a, b) {
+  const prev = Array.from({ length: b.length + 1 }, function (_, j) { return j; });
+  for (let i = 1; i <= a.length; i++) {
+    let diag = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const up = prev[j];
+      prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diag = up;
+    }
+  }
+  return prev[b.length];
+}
+
+// 两个课名像不像同一个、只是认错了几个字母（完全不一样的课名，比如专题课的不同主题，不算）
+function titlesLookAlike(a, b) {
+  const x = a.trim().toLowerCase();
+  const y = b.trim().toLowerCase();
+  if (x === y || x.length < 4 || y.length < 4) {
+    return false;
+  }
+  return editDistance(x, y) <= Math.max(2, Math.floor(Math.max(x.length, y.length) * 0.2));
+}
+
+// 把同一个课号里拼法差一点的课名统一起来
+// 输入：上课时段 [{ course, title }]（会直接改）、已经在课表里的课（用户确认过的课名最可信）
+// 输出：{ fixed: [{ course, from, to }]：自动改了哪些，ties: [{ course, options }]：一样多、要用户选的 }
+//   1. 课表里已经有这门课：用那个课名
+//   2. 某个拼法出现得最多：用它
+//   3. 一样多（比如 LEC 写对、DIS 写错，各一次）：不猜，交给用户选（rows 上记 titleOptions）
+function unifyTitles(rows, existing) {
+  const report = { fixed: [], ties: [] };
+  const byCourse = {};
+  rows.forEach(function (r) {
+    if (r.course && r.title && r.title.toUpperCase() !== r.course.toUpperCase()) {
+      (byCourse[r.course] = byCourse[r.course] || []).push(r);
+    }
+  });
+  Object.keys(byCourse).forEach(function (course) {
+    const group = byCourse[course];
+    const counts = {};
+    group.forEach(function (r) { counts[r.title] = (counts[r.title] || 0) + 1; });
+    const titles = Object.keys(counts);
+    if (titles.length < 2) {
+      return;
+    }
+    // 只处理"长得像"的那些拼法：和别的某个拼法差一点
+    const alike = titles.filter(function (t) {
+      return titles.some(function (u) { return u !== t && titlesLookAlike(t, u); });
+    });
+    if (alike.length < 2) {
+      return;
+    }
+    const known = (existing || []).find(function (c) {
+      return c.course === course && alike.some(function (t) { return t === c.title || titlesLookAlike(t, c.title); });
+    });
+    let best = known ? known.title : null;
+    if (!best) {
+      const top = Math.max.apply(null, alike.map(function (t) { return counts[t]; }));
+      const leaders = alike.filter(function (t) { return counts[t] === top; });
+      if (leaders.length === 1) {
+        best = leaders[0];
+      } else {
+        group.forEach(function (r) {
+          if (alike.includes(r.title)) {
+            r.titleOptions = leaders;
+          }
+        });
+        report.ties.push({ course: course, options: leaders });
+        return;
+      }
+    }
+    group.forEach(function (r) {
+      if (alike.includes(r.title) && r.title !== best) {
+        report.fixed.push({ course: course, from: r.title, to: best });
+        r.title = best;
+      }
+    });
+  });
+  return report;
 }
 
 // 从文字片段里找出所有课程（截图、PDF、Word、粘贴的文字都走这里）
@@ -1111,6 +1386,9 @@ function parseSchedule(segments, placeIndex, knownCourses, context) {
   result.guessedDays = sortDays([].concat.apply([], meetings.filter(function (m) { return m.dayGuessed; })
     .map(function (m) { return m.days; })));
   result.fileLocations = findAllLocations(rows, placeIndex);
+  // 截图表头只有日期、没有星期：星期是按日期推算的（假设了年份），也要让用户看一眼
+  const dated = meetings.find(function (m) { return m.dayFromDate; });
+  result.dateYear = dated ? dated.dateYear : null;
   return result;
 }
 

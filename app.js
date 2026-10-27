@@ -671,8 +671,12 @@ async function updateRoute(placeIndex, allowPartial) {
 // 生成"排名依据"下拉框的选项：只列出教学楼（包括 FitRec）
 // 输入：buildings 数组
 // 输出：<option> 的 HTML 字符串
-function buildBuildingOptions(buildings) {
+// withWeek：最上面加一个"我的整周课表"（按整周课表排名）
+function buildBuildingOptions(buildings, withWeek) {
   let html = '<option value="">-- Select a building --</option>';
+  if (withWeek) {
+    html += '<option value="my-week">⭐ My whole week of classes</option>';
+  }
   buildings.forEach(function (building) {
     html += `<option value="${building.id}" translate="no">${building.name}</option>`;
   });
@@ -717,15 +721,113 @@ function showDormRanking(ranked, building) {
   document.getElementById('results').innerHTML = html;
 }
 
+// ===== 按整周课表给宿舍排名 =====
+//
+// 每个上课日：从宿舍走到当天第一节课 + 最后一节课走回宿舍，一周加起来
+// 课和课之间的步行，从哪个宿舍出发都一样，所以不算
+
+// 排名下拉框要用的宿舍、教学楼（main 里存下来，课表变了重画下拉框时用）
+let rankData = null;
+
+// 能用来排名的课：确定了地点、有星期、有时间（my-classes.js）
+function weekRankClasses() {
+  if (typeof myClasses === 'undefined') {
+    return [];
+  }
+  return myClasses.items.filter(function (c) {
+    return c.status === 'confirmed' && c.place && c.days.length > 0 && c.start != null;
+  });
+}
+
+// 输入：dorms 数组、能用来排名的课
+// 输出：排好序的 [{ dorm, minutes: 一周总共, days: 上课天数, busiest: { day, minutes } }]
+function rankDormsByWeek(dorms, classes) {
+  const classDays = DAY_ORDER.map(function (day) {
+    const today = classes.filter(function (c) { return c.days.includes(day); })
+      .sort(function (a, b) { return a.start - b.start; });
+    return today.length > 0 ? { day: day, first: today[0].place, last: today[today.length - 1].place } : null;
+  }).filter(Boolean);
+
+  const ranked = dorms.map(function (dorm) {
+    let total = 0;
+    let busiest = { day: '', minutes: -1 };
+    classDays.forEach(function (d) {
+      // 每一段向上取整，和课间步行的显示一致
+      const minutes = Math.ceil(measureRoute(dorm, d.first).minutes) + Math.ceil(measureRoute(d.last, dorm).minutes);
+      total += minutes;
+      if (minutes > busiest.minutes) {
+        busiest = { day: d.day, minutes: minutes };
+      }
+    });
+    return { dorm: dorm, minutes: total, days: classDays.length, busiest: busiest };
+  });
+  ranked.sort(function (a, b) { return a.minutes - b.minutes; });
+  return ranked;
+}
+
+function showWeekRanking(ranked) {
+  const days = ranked.length > 0 ? ranked[0].days : 0;
+  // 有的课还没教室（或时间）：排名只算了一部分，要说出来，不然看起来像完整的结果
+  const courseKey = function (c) { return (c.course || c.title).toUpperCase(); };
+  const all = new Set(myClasses.items.filter(function (c) { return c.status !== 'skipped' && !c.draft && !c.sample; }).map(courseKey));
+  const used = new Set(weekRankClasses().map(courseKey));
+  const partial = used.size < all.size
+    ? `<div class="rank-partial"><span>Based on ${used.size} of ${all.size} courses. Add the rest for a fair ranking.</span>
+        <button type="button" class="small-button" data-action="rank-rooms">Add rooms</button></div>`
+    : '';
+  let html = `${partial}<p><strong>Walking to and from your classes, per week</strong></p>
+    <p class="rank-detail">From the dorm to your first class and back from your last class, on each of your ${days} class ${days === 1 ? 'day' : 'days'}. Walks between classes are the same from any dorm, so they aren't counted.</p><ol>`;
+  ranked.forEach(function (item) {
+    html += `
+      <li class="rank-item" data-dorm-id="${item.dorm.id}">
+        <strong translate="no">${item.dorm.name}</strong><br>
+        <span class="rank-detail">~${item.minutes} min a week · ~${Math.round(item.minutes / item.days)} min a class day</span><br>
+        <span class="rank-detail">Longest day: ${item.busiest.day}, ~${item.busiest.minutes} min</span><br>
+        <span class="rank-detail">Room types: ${item.dorm.room_types.join(', ')}</span>
+      </li>
+    `;
+  });
+  html += '</ol>';
+  document.getElementById('results').innerHTML = html;
+}
+
+// 排名下拉框：有能用的课时，最上面多一个"我的整周课表"；第一次有课时自动选上它
+// my-classes.js 每次课表变了都会调用（renderMyClasses）
+function refreshRankOptions() {
+  if (!rankData) {
+    return;
+  }
+  const select = document.getElementById('rank-select');
+  const before = select.value;
+  const hasWeek = weekRankClasses().length > 0;
+  select.innerHTML = buildBuildingOptions(rankData.buildings, hasWeek);
+  if (before === 'my-week' && !hasWeek) {
+    select.value = '';
+  } else if (before === '' && hasWeek) {
+    select.value = 'my-week';
+  } else {
+    select.value = before;
+  }
+  if (before === 'my-week' || select.value === 'my-week') {
+    updateRanking(rankData.dorms, rankData.buildings);
+  }
+}
+
 // 读取排名下拉框 → 计算 → 显示
 // 输入：dorms 数组、buildings 数组
 function updateRanking(dorms, buildings) {
   const buildingId = document.getElementById('rank-select').value;
+
+  if (buildingId === 'my-week') {
+    pinPlace('rank', null);
+    showWeekRanking(rankDormsByWeek(dorms, weekRankClasses()));
+    return;
+  }
   pinPlace('rank', buildingId); // 排名选的那栋楼一定显示在地图上
 
   if (buildingId === '') {
     document.getElementById('results').innerHTML =
-      '<p class="placeholder">Choose a building to rank the dorms.</p>';
+      '<p class="placeholder">Choose a building to rank the dorms. Add your classes in My week to rank them by your whole week.</p>';
     return;
   }
 
@@ -887,6 +989,8 @@ async function main() {
   document.getElementById('rank-select').addEventListener('input', function () {
     updateRanking(data.dorms, data.buildings);
   });
+  rankData = { dorms: data.dorms, buildings: data.buildings };
+  refreshRankOptions(); // 浏览器里已经存着课：直接按整周课表排
 
   // 宿舍搜索框
   const searchIndex = buildSearchIndex(data.dorms);
@@ -921,6 +1025,16 @@ async function main() {
   document.getElementById('results').addEventListener('click', function (event) {
     // event.target 是实际被点到的元素（可能是名字、距离文字……）
     // closest 从它开始往外找，找到最近的 .rank-item，也就是整个这一项
+    // 排名上方"只算了几门课"那一行的按钮：去补教室（my-classes.js）
+    if (event.target.closest('[data-action="rank-rooms"]')) {
+      if (coursesNeedingRooms().length > 0) {
+        openRoomsDialog();
+      } else {
+        showTab('week');
+        openFirstUnchecked();
+      }
+      return;
+    }
     const item = event.target.closest('.rank-item');
     if (item === null) {
       return; // 点到的是标题或空白处，不是某个宿舍

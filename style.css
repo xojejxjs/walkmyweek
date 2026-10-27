@@ -2332,3 +2332,1685 @@ li.walk-expanded button.walk-row.selected {
   padding-top: 10px;
   border-top: 1px solid var(--line);
 }
+
+/* ===== 课的详情输入框：编辑卡片和导入预览共用（my-classes.js renderDetailFields） ===== */
+.detail-box {
+  margin: 6px 0;
+  font-size: 13px;
+}
+
+.detail-box > summary {
+  cursor: pointer;
+  color: var(--action);
+}
+
+#sidebar .detail-fields .field,
+#sidebar .preview-row .field {
+  display: block;
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+#sidebar .detail-fields .field input {
+  margin-top: 2px;
+}
+
+.field-row {
+  display: flex;
+  gap: 8px;
+}
+
+#sidebar .field-row .field {
+  flex: 1;
+  min-width: 0;
+}
+
+#sidebar .field-row .field-short {
+  flex: 0 0 72px;
+}
+
+.day-field {
+  border: none;
+  padding: 0;
+  margin: 8px 0 0;
+}
+
+.day-field legend {
+  padding: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.day-chips {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+/* 星期：一个可以点的小方块，选中变蓝（真正的勾选框藏起来，键盘还能用） */
+#sidebar .day-chip {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+#sidebar .day-chip input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.day-chip span {
+  display: block;
+  padding: 5px 0;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: white;
+  color: var(--ink);
+  font-size: 13px;
+  text-align: center;
+}
+
+.day-chip input:checked + span {
+  border-color: var(--action);
+  background: var(--action);
+  color: white;
+}
+
+.day-chip input:focus-visible + span {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+.detail-error {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--late);
+}
+
+.detail-error:empty {
+  display: none;
+}
+
+.field-heading {
+  margin: 10px 0 0;
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.manual-row {
+  margin: 4px 0 10px;
+}
+
+/* ===== 导入预览（my-classes.js renderImportChoice） =====
+   思路：白底卡片，只有"需要你做的事"用蓝色；先给一张小周课表让人一眼看出对不对，
+   可疑的行放最上面并直接给出要改的那一项，没问题的收成一行一行，"添加"按钮一直贴在底部 */
+.import-choice.import-preview {
+  padding: 14px 14px 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: white;
+  box-shadow: 0 1px 3px rgba(17, 24, 39, 0.06);
+  font-size: 13px;
+}
+
+.import-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.import-title strong {
+  font-size: 16px;
+}
+
+.import-source {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.import-lead {
+  margin: 6px 0 12px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.import-note {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* 小周课表 */
+.mini-week {
+  display: flex;
+  gap: 3px;
+  padding: 8px 8px 8px 0;
+  border-radius: 8px;
+  background: #f7f8fa;
+}
+
+.mini-axis {
+  position: relative;
+  flex: 0 0 26px;
+  margin-top: 18px;
+}
+
+.mini-hour {
+  position: absolute;
+  right: 4px;
+  transform: translateY(-50%);
+  color: #9ca3af;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mini-day {
+  flex: 1;
+  min-width: 0;
+}
+
+.mini-day-name {
+  display: block;
+  height: 18px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.mini-day-body {
+  position: relative;
+  border-radius: 4px;
+  background-color: white;
+  background-image: repeating-linear-gradient(to bottom, transparent 0 calc(var(--hour) - 1px), #eef0f3 calc(var(--hour) - 1px) var(--hour));
+}
+
+.mini-day.weekend .mini-day-body {
+  background-color: #f7f8fa;
+}
+
+.mini-block {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 1px 2px;
+  overflow: hidden;
+  border: 1px solid white;
+  border-radius: 4px;
+  background: var(--mine);
+  color: white;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.15;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.mini-code,
+.mini-time {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-time {
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+.mini-block.focused {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+  z-index: 1;
+}
+
+.mini-block.flagged {
+  border: 1.5px dashed var(--action);
+  background: var(--action-bg);
+  color: var(--action);
+}
+
+.mini-off {
+  margin: 6px 0 0;
+  color: var(--action);
+  font-size: 12px;
+}
+
+.source-shot {
+  margin-top: 10px;
+}
+
+.source-shot > summary,
+.good-list > summary {
+  cursor: pointer;
+}
+
+.source-shot > summary {
+  color: var(--action);
+  font-size: 12px;
+}
+
+.source-shot img {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.preview-heading {
+  margin: 16px 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.issue-heading {
+  color: var(--action);
+}
+
+.good-list > summary.preview-heading {
+  color: var(--ok);
+}
+
+.preview-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.preview-row {
+  margin-bottom: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+}
+
+.preview-row.flash {
+  animation: row-flash 1.2s ease-out;
+}
+
+@keyframes row-flash {
+  from { box-shadow: 0 0 0 3px var(--action); }
+  to { box-shadow: 0 0 0 3px transparent; }
+}
+
+/* 可疑的行：蓝色 = 需要你看一眼 */
+.preview-row.issue {
+  border-color: #c9d8f3;
+  border-left: 4px solid var(--action);
+  background: var(--action-bg);
+}
+
+.issue-head strong {
+  display: block;
+  font-size: 14px;
+}
+
+.issue-head .rank-detail {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.issue-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink);
+}
+
+.issue-list li {
+  position: relative;
+  margin-top: 2px;
+  padding-left: 16px;
+}
+
+.issue-list li::before {
+  content: "→";
+  position: absolute;
+  left: 0;
+  color: var(--action);
+}
+
+.issue-fixed {
+  margin: 8px 0 0;
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.issue-fix:empty {
+  display: none;
+}
+
+.issue-fix .day-chips {
+  margin-top: 8px;
+}
+
+.preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.small-button-solid {
+  background: var(--action);
+  color: white;
+}
+
+/* 没问题的行：一行，点一下展开改 */
+.preview-row.good {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 0;
+}
+
+.good-main {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 92px 1fr;
+  gap: 1px 8px;
+  min-width: 0;
+  padding: 8px 0 8px 10px;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.good-when {
+  grid-row: span 2;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.good-name {
+  font-weight: 600;
+}
+
+.good-where {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-row.good .link-button {
+  color: #9ca3af;
+  text-decoration: none;
+}
+
+.preview-row.editing {
+  border-color: var(--action);
+}
+
+.add-row-button {
+  margin: 10px 0 4px;
+  color: var(--action);
+}
+
+/* 底部：一直贴在侧栏下方，往下翻多长都能点到"添加" */
+.import-footer {
+  position: sticky;
+  bottom: 0;
+  margin: 12px -14px 0;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 12px 12px;
+  background: white;
+}
+
+.target-choice {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+#sidebar .target-option {
+  flex: 1;
+  margin: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+#sidebar .target-option:has(input:checked) {
+  border-color: var(--action);
+  box-shadow: 0 0 0 1px var(--action);
+}
+
+#sidebar .target-option input {
+  width: auto;
+  margin: 0 4px 0 0;
+}
+
+#sidebar .import-name {
+  margin-bottom: 8px;
+}
+
+.import-foot-note {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.import-preview .import-actions {
+  margin-top: 0;
+}
+
+.import-preview .import-actions .primary-button {
+  flex: 1;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.row-flag {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--late-bg);
+  color: var(--late);
+  font-size: 11px;
+  font-weight: bold;
+}
+
+/* 电脑上侧栏自己滚动、四周有 16px 内边距：底部那条往下多盖 16px，下面的内容不会从缝里露出来 */
+@media (min-width: 769px) {
+  #sidebar .import-footer {
+    bottom: -16px;
+    padding-bottom: 28px;
+  }
+}
+
+
+/* ===== 导入预览弹窗（my-classes.js renderImportDialog） =====
+   不占满屏幕：四周露出变暗的页面，让人知道还在这个网页里
+   电脑：左边课表、右边要看的课，两边各自滚动，标题和"添加"按钮固定在上下
+   手机：从底部升起的面板，上面留一条露出页面 */
+.import-dialog {
+  width: min(980px, calc(100vw - 64px));
+  max-width: none;
+  height: min(720px, calc(100vh - 64px));
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+  border: none;
+  border-radius: 16px;
+  background: white;
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.28);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.import-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  animation: dialog-in 0.18s ease-out;
+}
+
+@keyframes dialog-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+.import-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.dlg-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px 24px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dlg-head h2 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+
+.dlg-lead {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.dlg-lead strong {
+  color: var(--ink);
+}
+
+.dlg-close {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: #f3f4f6;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.dlg-close:hover {
+  background: #e5e7eb;
+  color: var(--ink);
+}
+
+.dlg-body {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  min-height: 0;
+}
+
+.dlg-week {
+  padding: 16px 20px 20px 24px;
+  overflow-y: auto;
+}
+
+.dlg-side {
+  padding: 16px 24px 20px 20px;
+  overflow-y: auto;
+  border-left: 1px solid var(--line);
+  background: #fafbfc;
+}
+
+.dlg-side > .preview-heading:first-child,
+.dlg-side > .all-good:first-child {
+  margin-top: 0;
+}
+
+.all-good {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--ok-bg);
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.import-dialog .mini-block {
+  font-size: 10px;
+}
+
+.dlg-foot {
+  padding: 12px 24px 16px;
+  border-top: 1px solid var(--line);
+  background: white;
+}
+
+.dlg-foot-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.dlg-foot-row .import-foot-note {
+  flex: 1;
+  margin: 0;
+}
+
+.dlg-foot-row .primary-button {
+  width: auto;
+  margin: 0;
+  padding: 10px 22px;
+  border-radius: 8px;
+  text-align: center;
+}
+
+/* 弹窗不在 #sidebar 里，侧栏那些输入框样式这里再写一份 */
+.import-dialog .field {
+  display: block;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.import-dialog input[type="text"],
+.import-dialog input[type="time"],
+.import-dialog input[type="search"] {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 2px;
+  padding: 7px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: white;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.import-dialog input:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 0;
+}
+
+.import-dialog .field-row .field {
+  flex: 1;
+  min-width: 0;
+}
+
+.import-dialog .field-row .field-short {
+  flex: 0 0 80px;
+}
+
+.import-dialog .day-chip {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.import-dialog .day-chip input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.import-dialog .target-choice {
+  margin-bottom: 10px;
+}
+
+.import-dialog .target-option {
+  flex: 1;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.import-dialog .target-option:has(input:checked) {
+  border-color: var(--action);
+  box-shadow: 0 0 0 1px var(--action);
+}
+
+.import-dialog .target-option input {
+  margin: 0 4px 0 0;
+}
+
+.import-dialog .import-name {
+  margin-bottom: 10px;
+}
+
+@media (max-width: 768px) {
+  .import-dialog {
+    width: 100%;
+    height: auto;
+    max-height: calc(100dvh - 40px);
+    margin: auto 0 0;
+    border-radius: 16px 16px 0 0;
+  }
+
+  .import-dialog[open] {
+    animation-name: sheet-in;
+  }
+
+  @keyframes sheet-in {
+    from { transform: translateY(24px); opacity: 0; }
+    to { transform: none; opacity: 1; }
+  }
+
+  .dlg-head {
+    padding: 16px 16px 12px;
+  }
+
+  .dlg-head h2 {
+    font-size: 18px;
+  }
+
+  /* 一周 7 列挤在手机宽度里：字小一点、边距少一点，课号和时间才放得下 */
+  .import-dialog .mini-block {
+    padding: 1px;
+    font-size: 9px;
+    letter-spacing: -0.02em;
+  }
+
+  .import-dialog .mini-week {
+    gap: 2px;
+  }
+
+  .dlg-body {
+    display: block;
+    overflow-y: auto;
+  }
+
+  .dlg-week,
+  .dlg-side {
+    overflow: visible;
+    padding: 14px 16px;
+  }
+
+  .dlg-side {
+    border-left: none;
+    border-top: 1px solid var(--line);
+  }
+
+  .dlg-foot {
+    padding: 10px 16px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .dlg-foot-row {
+    flex-wrap: wrap;
+    gap: 8px 16px;
+  }
+
+  .dlg-foot-row .import-foot-note {
+    flex-basis: 100%;
+  }
+
+  .dlg-foot-row .primary-button {
+    flex: 1;
+  }
+}
+
+.import-foot-note:empty {
+  display: none;
+}
+
+/* ===== 导入弹窗：排版和颜色的细化 =====
+   颜色只做三件事：
+     深蓝（--mine）的浅底 = 你的课（和地图上"我的课"同一个颜色）
+     蓝（--action）       = 需要你看一眼 / 可以点的主要按钮；整个弹窗里只有这些地方是蓝的
+     灰                   = 其他一切（输入框、次要按钮、说明文字）
+   以前正常的课是实心深蓝、可疑的是浅色虚线，结果"有问题的"反而最不显眼；现在倒过来 */
+.import-dialog {
+  --dlg-surface: #f6f7f9;
+  --dlg-border: #e6e8ec;
+  --dlg-mine-bg: #eceef7;
+}
+
+.dlg-head {
+  padding: 22px 28px 16px;
+  border-bottom-color: var(--dlg-border);
+}
+
+.dlg-head h2 {
+  font-size: 20px;
+  font-weight: 650;
+}
+
+.dlg-week {
+  padding: 20px 24px 24px 28px;
+}
+
+.dlg-side {
+  padding: 20px 28px 24px 24px;
+  border-left-color: var(--dlg-border);
+  background: var(--dlg-surface);
+}
+
+/* 周课表：白底、细网格，不再是"盒子里的盒子" */
+.import-dialog .mini-week {
+  gap: 0;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+}
+
+.import-dialog .mini-axis {
+  flex-basis: 30px;
+  margin-top: 26px;
+}
+
+.import-dialog .mini-hour {
+  right: 8px;
+  color: #a1a7b3;
+  font-size: 10px;
+}
+
+.import-dialog .mini-day {
+  border-left: 1px solid var(--dlg-border);
+}
+
+.import-dialog .mini-day:last-child {
+  border-right: 1px solid var(--dlg-border);
+}
+
+.import-dialog .mini-day-name {
+  height: 26px;
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.import-dialog .mini-day-body {
+  border-radius: 0;
+  border-top: 1px solid var(--dlg-border);
+  border-bottom: 1px solid var(--dlg-border);
+  background-color: white;
+  background-image: repeating-linear-gradient(to bottom, transparent 0 calc(var(--hour) - 1px), #f1f2f5 calc(var(--hour) - 1px) var(--hour));
+}
+
+.import-dialog .mini-day.weekend .mini-day-name {
+  color: #a1a7b3;
+}
+
+.import-dialog .mini-day.weekend .mini-day-body {
+  background-color: #fafbfc;
+}
+
+/* 正常的课：浅底 + 左边一条深蓝 */
+.import-dialog .mini-block {
+  padding: 3px 4px 3px 6px;
+  border: none;
+  border-radius: 5px;
+  box-shadow: inset 3px 0 0 var(--mine);
+  background: var(--dlg-mine-bg);
+  color: var(--mine);
+  font-size: 10.5px;
+  line-height: 1.25;
+}
+
+.import-dialog .mini-block:hover {
+  background: #e0e3f1;
+}
+
+/* 要看一眼的课：更醒目，而不是更淡 */
+.import-dialog .mini-block.flagged {
+  border: none;
+  box-shadow: inset 0 0 0 1.5px var(--action);
+  background: repeating-linear-gradient(135deg, #e6eefb 0 5px, #f4f7fd 5px 10px);
+  color: var(--action);
+}
+
+.import-dialog .mini-block.focused {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.import-dialog .mini-off {
+  margin: 12px 0 0;
+  color: var(--action);
+  font-size: 12px;
+}
+
+.import-dialog .import-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.import-dialog .source-shot {
+  margin-top: 12px;
+}
+
+.import-dialog .source-shot > summary {
+  color: var(--muted);
+}
+
+.import-dialog .source-shot > summary:hover {
+  color: var(--ink);
+}
+
+/* 右边：小标题用小号大写字母 + 数字胶囊，不用表情符号 */
+.import-dialog .preview-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 22px 0 10px;
+  color: #4b5563;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.import-dialog .dlg-side > .preview-heading:first-child {
+  margin-top: 0;
+}
+
+.import-dialog .issue-heading,
+.import-dialog .good-list > summary.preview-heading {
+  color: #4b5563;
+}
+
+.import-dialog .good-list > summary.preview-heading {
+  list-style: none;
+  cursor: pointer;
+}
+
+.import-dialog .good-list > summary::-webkit-details-marker {
+  display: none;
+}
+
+.import-dialog .good-list > summary::after {
+  content: "›";
+  margin-left: 2px;
+  color: #a1a7b3;
+  font-size: 14px;
+  transition: transform 0.15s;
+}
+
+.import-dialog .good-list[open] > summary::after {
+  transform: rotate(90deg);
+}
+
+.count-pill {
+  display: inline-block;
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: var(--action);
+  color: white;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-align: center;
+}
+
+.count-pill-quiet {
+  background: #e5e7eb;
+  color: #4b5563;
+}
+
+/* 每一行：白卡片；要看一眼的，左边一条蓝 */
+.import-dialog .preview-row {
+  margin-bottom: 8px;
+  border: 1px solid var(--dlg-border);
+  border-radius: 10px;
+  background: white;
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04);
+}
+
+.import-dialog .preview-row.issue {
+  padding: 14px 16px;
+  border-left: 1px solid var(--dlg-border);
+  box-shadow: inset 3px 0 0 var(--action), 0 1px 2px rgba(17, 24, 39, 0.04);
+  background: white;
+}
+
+.import-dialog .issue-head strong {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.import-dialog .issue-head .rank-detail {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.import-dialog .issue-list {
+  margin: 10px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.import-dialog .issue-list li {
+  padding-left: 14px;
+}
+
+.import-dialog .issue-list li::before {
+  content: "";
+  top: 7px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--action);
+}
+
+.import-dialog .issue-fixed {
+  margin: 10px 0 0;
+  color: var(--ok);
+  font-size: 13px;
+}
+
+.import-dialog .issue-fixed::before {
+  content: "✓ ";
+}
+
+.import-dialog .issue-fix .field:first-child {
+  margin-top: 12px;
+}
+
+/* 星期：一整条分段按钮，而不是 7 个散开的方块；选中 = 深蓝（你的课） */
+.import-dialog .day-chips {
+  gap: 0;
+  margin-top: 12px;
+  overflow: hidden;
+  border: 1px solid #d5d9e0;
+  border-radius: 8px;
+}
+
+.import-dialog .detail-fields .day-chips {
+  margin-top: 4px;
+}
+
+.import-dialog .day-chip + .day-chip span {
+  border-left: 1px solid #e3e6eb;
+}
+
+.import-dialog .day-chip span {
+  padding: 6px 0;
+  border: none;
+  border-radius: 0;
+  background: white;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.import-dialog .day-chip:hover span {
+  background: #f5f6f8;
+}
+
+.import-dialog .day-chip input:checked + span {
+  background: var(--mine);
+  color: white;
+}
+
+.import-dialog .day-chip input:focus-visible + span {
+  outline: 2px solid var(--action);
+  outline-offset: -2px;
+}
+
+.import-dialog .field-row {
+  gap: 10px;
+}
+
+.import-dialog .preview-actions {
+  gap: 4px 16px;
+  margin-top: 14px;
+}
+
+/* 次要按钮：灰色描边 / 纯文字，不再到处是下划线 */
+.quiet-button {
+  padding: 6px 12px;
+  border: 1px solid #d5d9e0;
+  border-radius: 7px;
+  background: white;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.quiet-button:hover {
+  border-color: #b8bec9;
+  background: #f9fafb;
+}
+
+.quiet-button-solid {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: white;
+}
+
+.quiet-button-solid:hover {
+  background: #111827;
+}
+
+.text-button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.text-button:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.text-button-danger:hover {
+  color: var(--late);
+}
+
+/* 没问题的行 */
+.import-dialog .preview-row.good {
+  margin-bottom: 6px;
+  box-shadow: none;
+}
+
+.import-dialog .good-main {
+  grid-template-columns: 84px 1fr;
+  padding: 9px 0 9px 12px;
+}
+
+.import-dialog .good-when {
+  font-size: 12px;
+}
+
+.import-dialog .good-name {
+  font-size: 13px;
+}
+
+.import-dialog .preview-row.good .link-button {
+  color: #b0b6c0;
+}
+
+.import-dialog .preview-row.good .link-button:hover {
+  color: var(--late);
+}
+
+.add-row-button {
+  margin: 14px 0 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--action);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.add-row-button:hover {
+  text-decoration: underline;
+}
+
+.import-dialog .all-good {
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.import-dialog .all-good::before {
+  content: "✓ ";
+}
+
+/* 底部 */
+.dlg-foot {
+  padding: 14px 28px 18px;
+  border-top-color: var(--dlg-border);
+}
+
+.dlg-foot-row .import-foot-note {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.ghost-button {
+  padding: 10px 14px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: #4b5563;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ghost-button:hover {
+  background: #f3f4f6;
+  color: var(--ink);
+}
+
+.dlg-foot-row .primary-button {
+  padding: 10px 22px;
+  font-size: 14px;
+  font-weight: 650;
+  box-shadow: 0 1px 2px rgba(21, 88, 192, 0.25);
+}
+
+.dlg-foot-row .primary-button:hover:not(:disabled) {
+  background: #124ca6;
+}
+
+@media (max-width: 768px) {
+  .dlg-head {
+    padding: 18px 18px 14px;
+  }
+
+  .dlg-week,
+  .dlg-side {
+    padding: 16px 18px;
+  }
+
+  .dlg-foot {
+    padding: 12px 18px calc(14px + env(safe-area-inset-bottom));
+  }
+
+  .import-dialog .mini-axis {
+    flex-basis: 24px;
+  }
+
+  .import-dialog .mini-hour {
+    right: 4px;
+  }
+
+  .import-dialog .mini-block {
+    padding: 2px 2px 2px 5px;
+    font-size: 9px;
+  }
+
+  .import-dialog .mini-day-name {
+    font-size: 11px;
+  }
+}
+
+/* 要看一眼的课：右上角一个蓝色小问号，和普通的课一眼区分开 */
+.import-dialog .mini-block.flagged {
+  overflow: visible;
+  box-shadow: inset 0 0 0 1.5px var(--action);
+  background: #eaf1fd;
+}
+
+.import-dialog .mini-block.flagged::after {
+  content: "?";
+  position: absolute;
+  top: -6px;
+  right: -5px;
+  width: 15px;
+  height: 15px;
+  border: 2px solid white;
+  border-radius: 50%;
+  background: var(--action);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+}
+
+/* 导入弹窗里刚删掉一行：深色小条，可以马上撤销（和页面底部的 Undo 提示一个样子） */
+.undo-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 9px 12px 9px 14px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: white;
+  font-size: 13px;
+  animation: dialog-in 0.15s ease-out;
+}
+
+.undo-bar-button {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.14);
+  color: white;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.undo-bar-button:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+/* 删掉的行：灰掉，一行，右边 Restore */
+.import-dialog .removed-list {
+  margin-top: 8px;
+}
+
+.import-dialog .preview-row.removed {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 12px;
+  box-shadow: none;
+  background: transparent;
+  border-style: dashed;
+}
+
+.removed-name {
+  color: var(--muted);
+  font-weight: 600;
+  text-decoration: line-through;
+}
+
+.removed-when {
+  flex: 1;
+  color: #a1a7b3;
+  font-size: 12px;
+}
+
+/* 没有底部提示时，按钮也靠右 */
+.dlg-foot-row .ghost-button {
+  margin-left: auto;
+}
+
+/* 课间步行：一门课都还不能检查时的空状态（my-week.js renderUncheckedEmpty）
+   不列课名：下面 My classes 里已经有了；这里只说缺什么、给一个按钮去补 */
+.walks-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0 4px;
+  padding: 10px 12px 10px 14px;
+  border: 1px dashed #cdd5e3;
+  border-radius: 10px;
+  background: #fafbfc;
+}
+
+.walks-empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.walks-empty-text {
+  margin: 4px 0 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+/* 同一门课两种拼法：两个按钮，点一个 */
+.title-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* ===== 添加课表：一个主要动作 + 一行小字 ===== */
+.upload-alt {
+  margin: 10px 0 4px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.text-link {
+  padding: 2px 0;
+  border: none;
+  background: none;
+  color: var(--action);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.text-link:hover {
+  text-decoration: underline;
+}
+
+.upload-alt-dot {
+  margin: 0 8px;
+  color: #c3c8d0;
+}
+
+/* 粘贴框的标题藏起来：由上面的 "Paste text" 打开 */
+.paste-box > summary {
+  display: none;
+}
+
+.paste-box[open] {
+  margin: 8px 0;
+}
+
+.upload-privacy {
+  margin: 8px 0 4px;
+  font-size: 12px;
+  text-align: center;
+}
+
+.more-options {
+  margin: 6px 0 0;
+  font-size: 13px;
+}
+
+.more-options > summary {
+  color: var(--muted);
+  cursor: pointer;
+  text-align: center;
+  font-size: 12px;
+}
+
+.more-options > summary:hover {
+  color: var(--ink);
+}
+
+.more-options[open] {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.more-options[open] > summary {
+  margin-bottom: 8px;
+  text-align: left;
+}
+
+.more-title {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
+/* ===== 一次补完教室的弹窗（my-classes.js renderRoomsDialog） ===== */
+.rooms-dialog {
+  width: min(640px, calc(100vw - 64px));
+  height: auto;
+  max-height: min(760px, calc(100vh - 64px));
+}
+
+.dlg-body-single {
+  display: block;
+  overflow-y: auto;
+  padding: 8px 28px 20px;
+}
+
+.room-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.room-row {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--dlg-border);
+}
+
+.room-row:last-child {
+  border-bottom: none;
+}
+
+.room-course strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.room-meetings {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.room-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.room-chip {
+  padding: 6px 12px;
+  border: 1px solid #d5d9e0;
+  border-radius: 999px;
+  background: white;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.room-chip:hover {
+  border-color: #b8bec9;
+  background: #f9fafb;
+}
+
+/* 选中 = 深蓝（你的课在这里） */
+.room-chip.selected {
+  border-color: var(--mine);
+  background: var(--mine);
+  color: white;
+}
+
+.room-chip-quiet {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.room-chip-quiet.selected {
+  border-color: #6b7280;
+  background: #6b7280;
+}
+
+.room-detail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 10px;
+}
+
+.room-picked {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.import-dialog .room-number {
+  width: 140px;
+}
+
+.import-dialog .room-other-input {
+  flex: 1;
+  min-width: 200px;
+}
+
+.room-preview {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.room-preview:empty {
+  display: none;
+}
+
+/* 课程列表上方的提示：一句话 + 两个动作 */
+.review-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 8px;
+}
+
+.small-button-filled {
+  border-color: var(--action);
+  background: var(--action);
+  color: white;
+  font-weight: 600;
+}
+
+/* 整周排名只算了一部分课时 */
+.rank-partial {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 4px 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--action-bg);
+  font-size: 13px;
+}
+
+@media (max-width: 768px) {
+  .rooms-dialog {
+    width: 100%;
+  }
+
+  .dlg-body-single {
+    padding: 4px 18px 16px;
+  }
+}
+
+/* 手机：底部面板按内容高度（内容少时不要撑满整个屏幕），最高到屏幕顶部留 40px */
+@media (max-width: 768px) {
+  .import-dialog {
+    top: auto;
+    bottom: 0;
+    margin: 0;
+  }
+}
+
+/* 导入预览：星期时间都对、但还要选教室——不是"全部完成"，用"需要你做的事"的蓝色说下一步 */
+.next-step {
+  margin: 0 0 8px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--action-bg);
+}
+
+.next-step-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.next-step-title::before {
+  content: "✓ ";
+  color: var(--ok);
+}
+
+.next-step-text {
+  margin: 4px 0 0;
+  color: #374151;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* 补教室弹窗顶上的"第 2 步" */
+.dlg-step {
+  margin: 0 0 4px;
+  color: var(--action);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* 补教室弹窗：按内容高度，课少时不留一大块空白 */
+.rooms-dialog .dlg-body {
+  flex: 0 1 auto;
+}
+
+.rooms-dialog {
+  height: fit-content;
+}
