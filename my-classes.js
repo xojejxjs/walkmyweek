@@ -1995,7 +1995,11 @@ function offerImport(results, source, options) {
   // 统计：读出了几门课（只记区间）
   logEvent(found.length === 0 ? 'import-empty' : 'import-ok-' + classCountBucket(found.length));
   if (found.length === 0) {
-    status.textContent = [`Couldn't find any classes in ${source}. Try a clearer screenshot, paste the text, or add a class by hand.`]
+    // 粘贴的文字和截图，给的建议不一样
+    const tip = source === 'your text'
+      ? 'Check that it includes course numbers like CASMA 123, or add a class by hand.'
+      : 'Try a clearer screenshot, paste the text, or add a class by hand.';
+    status.textContent = [`Couldn't find any classes in ${source}. ${tip}`]
       .concat(opts.errors).join(' ');
     return;
   }
@@ -2250,6 +2254,9 @@ function rowIssues(row, rows) {
   }
   if (row.start == null) {
     issues.push({ kind: 'time', text: 'What time does it start and end?' });
+  } else if (row.end == null) {
+    // 只读到开始时间：课间步行要用下课时间，没有的话这门课不会算进去
+    issues.push({ kind: 'time', text: 'When does it end? We only read the start time.' });
   }
   const weekend = row.days.filter(function (d) { return d === 'Sat' || d === 'Sun'; });
   if (weekend.length > 0) {
@@ -2597,7 +2604,7 @@ function renderImportDialog(pending, dialog) {
     ${removedHtml}`;
 
   // 不改会怎样：没有星期或时间的课，不会出现在课间步行里
-  const incomplete = rows.filter(function (r) { return r.start == null || r.days.length === 0; }).length;
+  const incomplete = rows.filter(function (r) { return r.start == null || r.end == null || r.days.length === 0; }).length;
   const open = issues.filter(function (r) { return needsLook(r, rows); }).length;
   let footNote = '';
   if (incomplete > 0) {

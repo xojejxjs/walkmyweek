@@ -551,7 +551,8 @@ function formatBreak(minutes) {
 function uncheckedSummary(unchecked) {
   const courses = new Set(unchecked.map(function (c) { return (c.course || c.title).toUpperCase(); })).size;
   const allNoRoom = unchecked.every(function (c) { return uncheckedReason(c) === 'no location yet'; });
-  const what = allNoRoom ? 'a room' : 'a room or time';
+  const noneMissRoom = unchecked.every(function (c) { return uncheckedReason(c) !== 'no location yet'; });
+  const what = allNoRoom ? 'a room' : (noneMissRoom ? 'a day or time' : 'a room or time');
   return `${courses} ${courses === 1 ? 'course needs' : 'courses need'} ${what}`;
 }
 
