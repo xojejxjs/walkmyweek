@@ -3879,16 +3879,6 @@ li.walk-expanded button.walk-row.selected {
   color: white;
 }
 
-.room-chip-quiet {
-  color: var(--muted);
-  font-weight: 500;
-}
-
-.room-chip-quiet.selected {
-  border-color: #6b7280;
-  background: #6b7280;
-}
-
 .room-detail {
   display: flex;
   flex-wrap: wrap;
@@ -4013,4 +4003,25 @@ li.walk-expanded button.walk-row.selected {
 
 .rooms-dialog {
   height: fit-content;
+}
+
+/* 展开的一门课：Edit 是一个按钮，和 Directions 放在同一行 */
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.row-actions .directions-button {
+  margin-left: 0;
+}
+
+/* 列表上方：Edit all · Select */
+.list-head .select-toolbar .text-link {
+  font-size: 13px;
+}
+
+.list-head .select-toolbar .upload-alt-dot {
+  margin: 0 6px;
 }

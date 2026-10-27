@@ -780,8 +780,10 @@ function renderClassRow(c) {
         ${badge}
         ${classMetaLine(c)}<br>
         <span class="rank-detail">${locationLabel(c.place, c.room)}</span>
-        <button type="button" class="link-button edit-button" data-action="open">Edit</button>
-        <button type="button" class="directions-button" data-action="directions">Directions ›</button>
+        <div class="row-actions">
+          <button type="button" class="quiet-button" data-action="open">Edit</button>
+          <button type="button" class="directions-button" data-action="directions">Directions ›</button>
+        </div>
       </div>
     </li>`;
 }
@@ -827,8 +829,11 @@ function renderSelectToolbar(count) {
     return '';
   }
   if (!myClasses.selecting) {
+    // 改很多门：Edit all（周课表里一起改）；批量设地点、移到另一份课表、删除：Select
     return `<div class="select-toolbar">
-      <button type="button" class="link-button" data-action="select-start">Select classes</button>
+      <button type="button" class="text-link" data-action="edit-all">Edit all</button>
+      <span class="upload-alt-dot" aria-hidden="true">·</span>
+      <button type="button" class="text-link" data-action="select-start">Select</button>
     </div>`;
   }
 
@@ -1190,7 +1195,7 @@ function openRoomsDialog(afterImport) {
   }
   logEvent('rooms-dialog');
   myClasses.roomsAfterImport = afterImport || 0;
-  myClasses.roomDraft = {}; // 课号 → { place, room, other: 正在输入别的地方, otherText, skip: 线上课 }
+  myClasses.roomDraft = {}; // 课号 → { place, room, other: 正在输入别的地方, otherText }
   renderRoomsDialog();
   const dialog = document.getElementById('rooms-dialog');
   if (!dialog.open) {
@@ -1234,7 +1239,7 @@ function renderRoomRow(group) {
       </div>`;
   }
   return `
-    <li class="room-row${draft.place || draft.skip ? ' done' : ''}" data-key="${escapeAttr(group.key)}">
+    <li class="room-row${draft.place ? ' done' : ''}" data-key="${escapeAttr(group.key)}">
       <div class="room-course">
         <strong translate="no">${escapeHtml(group.title || group.course)}</strong>
         <span class="room-meetings" translate="no">${escapeHtml(group.course)}${meetings ? ' · ' + escapeHtml(meetings) : ''}</span>
@@ -1242,7 +1247,6 @@ function renderRoomRow(group) {
       <div class="room-choices">
         ${chips}
         <button type="button" class="room-chip${otherPicked ? ' selected' : ''}" data-action="room-other">${group.candidates.length > 0 ? 'Other' : 'Pick a building'}</button>
-        <button type="button" class="room-chip room-chip-quiet${draft.skip ? ' selected' : ''}" data-action="room-skip" aria-pressed="${Boolean(draft.skip)}">Online</button>
       </div>
       ${detail}
     </li>`;
@@ -1252,7 +1256,7 @@ function renderRoomsDialog() {
   const dialog = document.getElementById('rooms-dialog');
   const groups = coursesNeedingRooms();
   const draft = myClasses.roomDraft;
-  const done = groups.filter(function (g) { return draft[g.key] && (draft[g.key].place || draft[g.key].skip); }).length;
+  const done = groups.filter(function (g) { return draft[g.key] && draft[g.key].place; }).length;
   const scroll = dialog.querySelector('.dlg-body') ? dialog.querySelector('.dlg-body').scrollTop : 0;
   dialog.innerHTML = `
     <div class="dlg-head">
@@ -1321,8 +1325,6 @@ function handleRoomsClick(event) {
     draft[group.key] = { place: pick.place, room: '' };
   } else if (action === 'room-other') {
     draft[group.key] = { other: true, otherText: '' };
-  } else if (action === 'room-skip') {
-    draft[group.key] = draft[group.key] && draft[group.key].skip ? {} : { skip: true };
   }
   renderRoomsDialog();
   if (action === 'room-other') {
@@ -1349,11 +1351,11 @@ function handleRoomsInput(event) {
   }
 }
 
-// 保存：每门课的所有时段一起设好；选了 Online 的收进 "Removed & skipped"（可以恢复）
+// 保存：每门课的所有时段一起设好（线上课不在这里处理，在课程卡片里点 Skip）
 function saveRooms() {
   const groups = coursesNeedingRooms();
   const draft = myClasses.roomDraft;
-  const chosen = groups.filter(function (g) { return draft[g.key] && (draft[g.key].place || draft[g.key].skip); });
+  const chosen = groups.filter(function (g) { return draft[g.key] && draft[g.key].place; });
   closeRoomsDialog();
   if (chosen.length === 0) {
     return;
@@ -1363,15 +1365,10 @@ function saveRooms() {
     chosen.forEach(function (g) {
       const d = draft[g.key];
       g.items.forEach(function (c) {
-        if (d.skip) {
-          c.statusBeforeSkip = c.status;
-          c.status = 'skipped';
-        } else {
-          Object.assign(c, {
-            place: d.place, room: d.room || '', code: d.place.code || '',
-            status: 'confirmed', source: 'user', scanSuggestion: null, scanMessage: ''
-          });
-        }
+        Object.assign(c, {
+          place: d.place, room: d.room || '', code: d.place.code || '',
+          status: 'confirmed', source: 'user', scanSuggestion: null, scanMessage: ''
+        });
       });
     });
   });
@@ -1483,6 +1480,12 @@ function handleListClick(event) {
 
   if (action === 'lookup-address') {
     handleAddressLookup(button.closest('[data-id]'));
+    return;
+  }
+
+  // 在弹窗里一起改所有的课
+  if (action === 'edit-all') {
+    openEditAll();
     return;
   }
 
@@ -1995,6 +1998,89 @@ function applyImport(results, target, name) {
   return filledIn;
 }
 
+// ===== 一起改所有的课 =====
+// 课已经放进课表以后，想一次改好几门：打开和导入预览同一个弹窗（周课表 + 列表），内容是现在这份课表里的课
+// 点课表里的一格或列表里的一行就展开改；删掉的可以恢复；Save 才真正改（有 Undo）
+
+function openEditAll() {
+  const items = myClasses.items.filter(function (c) { return !c.draft && !c.sample && c.status !== 'skipped'; });
+  if (items.length === 0) {
+    return;
+  }
+  logEvent('edit-all');
+  dropPendingImport();
+  let nextRow = 1;
+  myClasses.pendingImport = {
+    mode: 'edit',
+    source: '',
+    count: items.length,
+    already: 0,
+    askTarget: false,
+    guessed: [],
+    errors: [],
+    dateYear: null,
+    images: [],
+    rows: items.map(function (c) {
+      const text = c.place ? (c.place.code || c.place.name) + (c.room ? ' ' + c.room : '') : '';
+      return Object.assign({}, c, {
+        days: c.days.slice(), key: nextRow++, itemId: c.id, locationText: text, readLocationText: text, open: false
+      });
+    })
+  };
+  myClasses.pendingImport.nextRow = nextRow;
+  renderImportChoice();
+}
+
+// 把弹窗里改好的放回课表：改过的课更新，删掉的收进 "Removed & skipped"，新加的放进来；整次可以 Undo
+function applyEditAll(rows) {
+  const changed = rows.filter(function (r) { return !(r.itemId && !r.removed && !rowChanged(r)); }).length;
+  changeWithUndo(changed === 0 ? 'No changes' : `Saved changes to ${changed} class ${changed === 1 ? 'time' : 'times'}`, function () {
+    rows.forEach(function (r) {
+      const item = r.itemId ? myClasses.items.find(function (c) { return c.id === r.itemId; }) : null;
+      if (r.removed) {
+        if (item) {
+          item.statusBeforeSkip = item.status;
+          item.status = 'skipped';
+        }
+        return;
+      }
+      const target = item || {
+        id: nextClassId++, place: null, code: '', room: '', noRoom: false, candidates: [],
+        status: 'none', source: 'user', scanSuggestion: null, scanMessage: ''
+      };
+      applyDetails(target, { title: r.title || r.course, course: r.course, section: r.section, days: r.days, start: r.start, end: r.end, time: r.time });
+      const location = rowLocation(r);
+      if (location) {
+        const same = target.place && location.place.id === target.place.id && location.room === target.room;
+        Object.assign(target, {
+          place: location.place, room: location.room, code: location.place.code || '', status: 'confirmed',
+          source: same ? target.source : 'user', scanSuggestion: null, scanMessage: ''
+        });
+      } else if (r.locationText !== r.readLocationText || !target.place) {
+        // 地点被清空了（或者从来没有）：变回"等你确认地点"
+        Object.assign(target, { place: null, room: '', code: '', status: (target.candidates || []).length > 0 ? 'guess' : 'none' });
+      }
+      if (!item) {
+        target.candidates = guessLocations(target.course, myClasses.placeIndex);
+        if (!target.place) {
+          target.status = target.candidates.length > 0 ? 'guess' : 'none';
+        }
+        myClasses.items.push(target);
+      }
+    });
+  });
+}
+
+// 弹窗里的一行和课表里原来那门课比，有没有改过
+function rowChanged(r) {
+  const c = myClasses.items.find(function (item) { return item.id === r.itemId; });
+  if (!c) {
+    return true;
+  }
+  return c.title !== r.title || c.course !== r.course || (c.section || '') !== (r.section || '') ||
+    c.start !== r.start || c.end !== r.end || c.days.join() !== r.days.join() || r.locationText !== r.readLocationText;
+}
+
 // 关掉导入预览；预览里给截图开的临时网址也一起释放
 function dropPendingImport() {
   const pending = myClasses.pendingImport;
@@ -2412,16 +2498,16 @@ function renderImportDialog(pending, dialog) {
     : '';
   const side = `
     ${undoBar}
-    ${allGood && noRoomCourses === 0 ? '<p class="all-good">Everything looks right. Give the calendar one glance, then add.</p>' : ''}
-    ${allGood && noRoomCourses > 0 ? `<div class="next-step">
+    ${allGood && noRoomCourses === 0 && pending.mode !== 'edit' ? '<p class="all-good">Everything looks right. Give the calendar one glance, then add.</p>' : ''}
+    ${allGood && noRoomCourses > 0 && pending.mode !== 'edit' ? `<div class="next-step">
         <p class="next-step-title">Days and times look right</p>
         <p class="next-step-text">Next, pick where ${noRoomCourses === 1 ? 'your course meets' : `your ${noRoomCourses} courses meet`}. ${noRoomAll ? 'This file doesn’t list rooms.' : 'Some rooms are missing.'} It takes a few taps.</p>
       </div>` : ''}
     ${editing.length > 0 ? '<ul class="preview-list">' + editing.map(renderPreviewEditor).join('') + '</ul>' : ''}
     ${issues.length > 0 ? `<h3 class="preview-heading issue-heading">Needs a quick look <span class="count-pill">${issues.length}</span></h3>
       <ul class="preview-list">${issues.map(function (r) { return renderIssueRow(r, rows); }).join('')}</ul>` : ''}
-    ${good.length > 0 ? `<details class="good-list"${allGood ? ' open' : ''}>
-      <summary class="preview-heading">${noRoomCourses > 0 ? 'Days &amp; times look right' : 'Looks right'} <span class="count-pill count-pill-quiet">${good.length}</span></summary>
+    ${good.length > 0 ? `<details class="good-list"${allGood || pending.mode === 'edit' ? ' open' : ''}>
+      <summary class="preview-heading">${pending.mode === 'edit' ? 'Your classes' : (noRoomCourses > 0 ? 'Days &amp; times look right' : 'Looks right')} <span class="count-pill count-pill-quiet">${good.length}</span></summary>
       <ul class="preview-list">${good.map(function (r) { return renderGoodRow(r, noRoomAll); }).join('')}</ul></details>` : ''}
     <button type="button" class="add-row-button" data-action="row-add">+ Add a class time we missed</button>
     ${removedHtml}`;
@@ -2434,7 +2520,7 @@ function renderImportDialog(pending, dialog) {
     footNote = `${incomplete} without a day or time won’t show in your walks until you add one.`;
   } else if (open > 0) {
     footNote = `${open} still flagged. You can also fix ${open === 1 ? 'it' : 'them'} later in My classes.`;
-  } else if (noRoomCourses > 0) {
+  } else if (noRoomCourses > 0 && pending.mode !== 'edit') {
     footNote = 'Step 1 of 2: days and times. Next: rooms.';
   }
 
@@ -2446,11 +2532,12 @@ function renderImportDialog(pending, dialog) {
   const focused = document.activeElement && dialog.contains(document.activeElement) ? document.activeElement : null;
   const focusKey = focused ? [focused.closest('[data-row]') && focused.closest('[data-row]').dataset.row, focused.className, focused.value] : null;
 
+  const editing_all = pending.mode === 'edit';
   dialog.innerHTML = `
     <div class="dlg-head">
       <div class="dlg-title">
-        <h2 id="import-dialog-title">Check your classes</h2>
-        <p class="dlg-lead">We found <strong>${courses} ${courses === 1 ? 'course' : 'courses'}</strong> and <strong>${count} class ${count === 1 ? 'time' : 'times'}</strong> in <span translate="no">${escapeHtml(friendlySource(pending.source))}</span>. Does your week look like this?</p>
+        <h2 id="import-dialog-title">${editing_all ? 'Edit your classes' : 'Check your classes'}</h2>
+        ${editing_all ? `<p class="dlg-lead">Tap a class on the calendar or in the list to change it. Nothing changes until you save.</p>` : `<p class="dlg-lead">We found <strong>${courses} ${courses === 1 ? 'course' : 'courses'}</strong> and <strong>${count} class ${count === 1 ? 'time' : 'times'}</strong> in <span translate="no">${escapeHtml(friendlySource(pending.source))}</span>. Does your week look like this?</p>`}
       </div>
       <button type="button" class="dlg-close" data-action="import-cancel" aria-label="Close without adding">×</button>
     </div>
@@ -2467,7 +2554,7 @@ function renderImportDialog(pending, dialog) {
       <div class="dlg-foot-row">
         <p class="import-foot-note">${footNote}</p>
         <button type="button" class="ghost-button" data-action="import-cancel">Cancel</button>
-        <button type="button" class="primary-button" data-action="import-done" ${count === 0 ? 'disabled' : ''}>${count === 0 ? 'Nothing to add' : (noRoomCourses > 0 ? 'Next: add rooms →' : `Add ${count} class ${count === 1 ? 'time' : 'times'}`)}</button>
+        <button type="button" class="primary-button" data-action="import-done" ${count === 0 && !editing_all ? 'disabled' : ''}>${editing_all ? 'Save changes' : (count === 0 ? 'Nothing to add' : (noRoomCourses > 0 ? 'Next: add rooms →' : `Add ${count} class ${count === 1 ? 'time' : 'times'}`))}</button>
       </div>
     </div>`;
   ['.dlg-body', '.dlg-side', '.dlg-week'].forEach(function (sel, i) {
@@ -2577,6 +2664,11 @@ function handleImportChoiceClick(event) {
   // 小周课表里点一个格子：跳到那一行；没问题的行在收起的列表里，先展开
   if (action === 'row-focus') {
     pending.focus = Number(button.dataset.row);
+    if (pending.mode === 'edit') {
+      keepOpenRowInputs(importRoot());
+      const focusRow = pending.rows.find(function (r) { return r.key === pending.focus; });
+      focusRow.open = true;
+    }
     renderImportChoice(); // 课表里点的那一格加粗
     const target = importRoot().querySelector(`.preview-row[data-row="${button.dataset.row}"]`);
     if (target) {
@@ -2633,9 +2725,10 @@ function handleImportChoiceClick(event) {
 
   if (action === 'import-cancel') {
     logEvent('import-choice-cancel');
+    const wasEdit = pending.mode === 'edit';
     dropPendingImport();
     renderImportChoice();
-    flashStatus('Nothing was added.');
+    flashStatus(wasEdit ? 'No changes made.' : 'Nothing was added.');
     return;
   }
 
@@ -2647,6 +2740,16 @@ function handleImportChoiceClick(event) {
         return;
       }
     }
+  }
+  // 一起改（不是导入）：直接改课表，然后关掉；有课没地点就接着补教室
+  if (pending.mode === 'edit') {
+    dropPendingImport();
+    renderImportChoice();
+    applyEditAll(pending.rows);
+    if (coursesNeedingRooms().length > 0 && pending.rows.some(function (r) { return !r.removed && !rowLocation(r); })) {
+      openRoomsDialog();
+    }
+    return;
   }
   const checked = document.querySelector('input[name="import-target"]:checked');
   const target = checked ? checked.value : 'add';
