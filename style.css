@@ -4159,3 +4159,167 @@ li.walk-expanded button.walk-row.selected {
     bottom: 8px;
   }
 }
+
+/* ===== 整周宿舍排名（app.js showWeekRanking） =====
+   一行：名次 · 名字 + 横条 · 大数字；横条越短越近，第一名颜色最深
+   点一行展开每天的明细，看得懂数字是怎么来的 */
+.week-rank-title {
+  margin: 4px 0 2px;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.week-rank-how {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.week-rank {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.week-rank-item {
+  border-bottom: 1px solid var(--line);
+}
+
+.wr-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 2px;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wr-row:hover {
+  background: #f9fafb;
+}
+
+.wr-pos {
+  flex: none;
+  width: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.wr-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.wr-name {
+  display: block;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wr-bar {
+  display: block;
+  height: 6px;
+  margin-top: 6px;
+  border-radius: 3px;
+  background: #eef0f4;
+}
+
+.wr-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: #b9bfdc; /* 深蓝（你的课）的浅色：走的是去你的课的路 */
+}
+
+.week-rank-item.best .wr-bar > span {
+  background: var(--mine);
+}
+
+.wr-num {
+  flex: none;
+  min-width: 68px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+
+.wr-num strong {
+  color: var(--ink);
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wr-diff {
+  display: block;
+  margin-top: 1px;
+  font-size: 11px;
+}
+
+.week-rank-item.best .wr-diff {
+  color: var(--mine);
+  font-weight: 600;
+}
+
+.week-rank-item.open .wr-row {
+  background: #f6f7f9;
+}
+
+.wr-detail {
+  padding: 4px 4px 12px 30px;
+  background: #f6f7f9;
+  font-size: 12px;
+}
+
+.wr-days {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.wr-days th,
+.wr-days td {
+  padding: 4px 6px 4px 0;
+  text-align: left;
+  font-weight: 400;
+  color: #374151;
+  vertical-align: top;
+}
+
+.wr-days th {
+  width: 34px;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.wr-days .wr-day-total {
+  color: var(--ink);
+  font-weight: 600;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.wr-rooms {
+  margin: 8px 0 6px;
+  color: var(--muted);
+}
+
+.wr-days thead th {
+  padding-bottom: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.wr-days td {
+  white-space: nowrap;
+}
