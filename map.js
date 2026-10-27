@@ -326,46 +326,71 @@ function clearRouteEnds() {
   layoutClassLabels();
 }
 
-// ===== 整周宿舍排名：最近的 3 个宿舍标上 ①②③（app.js showWeekRanking） =====
-// 只在 Find a dorm 页显示：My week 里的 ①②③ 是"当天上课的顺序"，两种编号同时出现会搞混
-const rankBadgeLayer = L.featureGroup();
+// ===== 整周宿舍排名：在地图上比较几个宿舍（app.js showWeekRanking） =====
+// 勾选的宿舍：宿舍点放大、旁边写名字；从宿舍连到你每天第一节课、最后一节课的楼
+// 每个宿舍一种颜色，都是实线；这几种颜色在地图上没有别的意思（深浅差得多，色弱的人也分得开）
+// 只在 Find a dorm 页显示：My week 的地图上画的是课和课之间的路
+const DORM_COMPARE_STYLES = [
+  { color: '#ea580c' },   // 橙：和地图上宿舍的颜色一样
+  { color: '#475569' },   // 石板灰
+  { color: '#92400e' }    // 深棕
+];
+const dormCompareLayer = L.featureGroup();
 
-function setDormRankBadgesVisible(visible) {
+function setDormCompareVisible(visible) {
   if (visible) {
-    rankBadgeLayer.addTo(map);
+    dormCompareLayer.addTo(map);
   } else {
-    rankBadgeLayer.remove();
+    dormCompareLayer.remove();
   }
 }
 
-function showDormRankBadges(dorms) {
-  rankBadgeLayer.clearLayers();
-  setDormRankBadgesVisible(currentTab() === 'dorm');
-  dorms.forEach(function (dorm, i) {
-    L.marker([dorm.latitude, dorm.longitude], {
-      icon: L.divIcon({ className: 'rank-badge-icon', html: `<div class="rank-badge">${i + 1}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }),
-      zIndexOffset: 800,
-      keyboard: false
+// entries：[{ dorm, style, targets: [{ place, minutes, note }] }]
+// paths：沿街道的路线，key 是 "宿舍 id>楼 id"；没有的（或没打开路线）画直线虚线
+function showDormCompare(entries, paths) {
+  dormCompareLayer.clearLayers();
+  setDormCompareVisible(currentTab() === 'dorm');
+  entries.forEach(function (entry) {
+    const style = entry.style;
+    entry.targets.forEach(function (t) {
+      const path = paths && paths[entry.dorm.id + '>' + t.place.id];
+      const points = path && path.length > 1
+        ? path
+        : [[entry.dorm.latitude, entry.dorm.longitude], [t.place.latitude, t.place.longitude]];
+      L.polyline(points, { color: 'white', weight: 7, opacity: 0.9 }).addTo(dormCompareLayer);
+      L.polyline(points, { color: style.color, weight: 4, opacity: 0.95, lineCap: 'round' })
+        .bindTooltip(keepOriginal(escapeHtml(`${entry.dorm.name} → ${t.place.code || t.place.name}`)) + ` · ${t.minutes} min · ${escapeHtml(t.note)}`, { sticky: true })
+        .addTo(dormCompareLayer);
+    });
+    // 宿舍：放大的点 + 一直显示的名字
+    L.circleMarker([entry.dorm.latitude, entry.dorm.longitude], {
+      radius: 11, color: 'white', weight: 3, fillColor: style.color, fillOpacity: 1
     })
-      .bindTooltip(keepOriginal(escapeHtml(`${i + 1}. ${dorm.name}`)))
-      .on('click', function () {
-        showDormInfo(dorm);
-        highlightPlace(dorm);
+      .bindTooltip(keepOriginal(escapeHtml(entry.dorm.name)), {
+        permanent: true, direction: 'top', offset: [0, -10], className: 'dorm-compare-label'
       })
-      .addTo(rankBadgeLayer);
+      .on('click', function () {
+        showDormInfo(entry.dorm);
+        highlightPlace(entry.dorm);
+      })
+      .addTo(dormCompareLayer);
   });
 }
 
-function clearDormRankBadges() {
-  rankBadgeLayer.clearLayers();
+function clearDormCompare() {
+  dormCompareLayer.clearLayers();
 }
 
-// "Show top 3 on map"：地图缩放到能同时看到这 3 个宿舍和你上课的楼
-function showDormRankOnMap(dorms, classPlaces) {
-  bringMapIntoView();
-  const points = dorms.concat(classPlaces).map(function (p) { return [p.latitude, p.longitude]; });
+// 地图缩放到能看到这几个宿舍和它们连到的楼
+function fitDormCompare(entries) {
+  const points = [];
+  entries.forEach(function (entry) {
+    points.push([entry.dorm.latitude, entry.dorm.longitude]);
+    entry.targets.forEach(function (t) { points.push([t.place.latitude, t.place.longitude]); });
+  });
   if (points.length > 0) {
-    map.fitBounds(L.latLngBounds(points), { padding: [60, 60], maxZoom: 17 });
+    bringMapIntoView();
+    map.fitBounds(L.latLngBounds(points), { padding: [70, 70], maxZoom: 17 });
   }
 }
 

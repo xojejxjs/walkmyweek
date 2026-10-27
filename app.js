@@ -767,6 +767,73 @@ let weekRankOpenId = null;
 // 整周排名是不是展开了全部宿舍（默认只看前 5 个）
 let weekRankShowAll = false;
 const WEEK_RANK_TOP = 5;
+// 勾选了哪些宿舍在地图上比较（宿舍 id，按勾选的先后，决定颜色）；null = 还没动过，默认只看最近的那个
+let weekCompareIds = null;
+const WEEK_COMPARE_MAX = 3;
+// 地图上画不画沿街道的步行路线（默认直线，打开才向后端要路线）
+let weekShowRoutes = false;
+// 要到的路线，key 是 "宿舍 id>楼 id"，value 是一串 [纬度, 经度]
+const weekRoutePaths = {};
+// 上一次算出的排名：只重画地图时用
+let lastWeekRanked = [];
+
+// 一个宿舍在地图上要连到哪些楼：每天第一节课、最后一节课的楼（同一栋楼合成一条线）
+// 输出：[{ place, minutes, note: 'first class Mon, Wed · last class Tue' }]
+function compareTargets(item) {
+  const byPlace = {};
+  item.perDay.forEach(function (d) {
+    [['first', d.first, d.to], ['last', d.last, d.back]].forEach(function (leg) {
+      const t = byPlace[leg[1].id] = byPlace[leg[1].id] || { place: leg[1], minutes: leg[2], first: [], last: [] };
+      t[leg[0]].push(d.day);
+    });
+  });
+  return Object.values(byPlace).map(function (t) {
+    const note = [t.first.length ? 'first class ' + t.first.join(', ') : '', t.last.length ? 'last class ' + t.last.join(', ') : '']
+      .filter(Boolean).join(' · ');
+    return { place: t.place, minutes: t.minutes, note: note };
+  });
+}
+
+// 多勾一个宿舍：满了就换掉最后勾的那个
+function addCompare(ids, id) {
+  const kept = ids.length >= WEEK_COMPARE_MAX ? ids.slice(0, WEEK_COMPARE_MAX - 1) : ids;
+  return kept.concat([id]);
+}
+
+// 勾选的宿舍 → 地图上要画的东西（颜色按勾选的先后）
+function compareEntries(ranked) {
+  return (weekCompareIds || []).map(function (id, i) {
+    const item = ranked.find(function (r) { return r.dorm.id === id; });
+    return item ? { dorm: item.dorm, style: DORM_COMPARE_STYLES[i], targets: compareTargets(item) } : null;
+  }).filter(Boolean);
+}
+
+// 重画地图上的比较；打开了路线的话，缺的路线向后端要，要到一条就再画一次
+function drawWeekCompare(ranked, fit) {
+  const entries = compareEntries(ranked);
+  showDormCompare(entries, weekShowRoutes ? weekRoutePaths : null);
+  if (fit) {
+    fitDormCompare(entries);
+  }
+  if (!weekShowRoutes) {
+    return;
+  }
+  entries.forEach(function (entry) {
+    entry.targets.forEach(function (t) {
+      const key = entry.dorm.id + '>' + t.place.id;
+      if (key in weekRoutePaths) {
+        return;
+      }
+      weekRoutePaths[key] = null; // 正在要，别重复要
+      fetchRealRoute(entry.dorm, t.place).then(function (route) {
+        weekRoutePaths[key] = route && route.path ? route.path : null;
+        if (weekShowRoutes && route && route.path) {
+          showDormCompare(compareEntries(lastWeekRanked), weekRoutePaths);
+        }
+      });
+    });
+  });
+}
 
 // 一个地点在明细里的写法：楼宇代码（"CAS"），没有代码时用名字
 function shortPlace(place) {
@@ -811,6 +878,12 @@ function showWeekRanking(ranked) {
 
   const best = ranked[0];
   const bestTrip = minutesPerTrip(best);
+  lastWeekRanked = ranked;
+  // 默认在地图上看最近的那个；勾选过的宿舍如果不在排名里了（比如课表变了），去掉
+  if (weekCompareIds === null) {
+    weekCompareIds = [best.dorm.id];
+  }
+  weekCompareIds = weekCompareIds.filter(function (id) { return ranked.some(function (r) { return r.dorm.id === id; }); });
   const shown = weekRankShowAll ? ranked : ranked.slice(0, WEEK_RANK_TOP);
   // 横条按"显示出来的这几个"里最远的来画：前几名之间的差别才看得出来
   const most = Math.max.apply(null, shown.map(minutesPerTrip).concat([1]));
@@ -820,9 +893,13 @@ function showWeekRanking(ranked) {
       <p class="rank-hero-label">Closest to your classes</p>
       <p class="rank-hero-name" translate="no">${escapeHtml(best.dorm.name)}</p>
       <p class="rank-hero-time">about <strong>${bestTrip} min</strong> walk to class · ${walkTier(bestTrip)}</p>
-      <button type="button" class="small-button" data-action="rank-map">Show top 3 on map</button>
+      <button type="button" class="small-button" data-action="rank-map">Show on map</button>
     </div>
     <p class="week-rank-how">Average walk from the dorm to your first class and back from your last, on your ${best.days} class ${best.days === 1 ? 'day' : 'days'}.</p>
+    <div class="wr-map-controls">
+      <span>Tick up to ${WEEK_COMPARE_MAX} dorms to compare on the map</span>
+      <label class="wr-toggle"><input type="checkbox" id="wr-routes" ${weekShowRoutes ? 'checked' : ''}> Walking routes</label>
+    </div>
     <ol class="week-rank">`;
   shown.forEach(function (item, i) {
     const open = weekRankOpenId === item.dorm.id;
@@ -842,12 +919,15 @@ function showWeekRanking(ranked) {
         <p class="wr-rooms">About ${item.minutes} min of walking a week · Room types: ${escapeHtml(item.dorm.room_types.join(', '))}</p>
         <button type="button" class="text-link" data-action="rank-dorm-info">Dorm details & map ›</button>
       </div>` : '';
+    const compareIndex = weekCompareIds.indexOf(item.dorm.id);
+    const compareStyle = compareIndex >= 0 ? `style="--compare:${DORM_COMPARE_STYLES[compareIndex].color}"` : '';
     html += `
-      <li class="week-rank-item${open ? ' open' : ''}${i === 0 ? ' best' : ''}" data-dorm-id="${item.dorm.id}">
+      <li class="week-rank-item${open ? ' open' : ''}${i === 0 ? ' best' : ''}${compareIndex >= 0 ? ' compared' : ''}" data-dorm-id="${item.dorm.id}">
+        <button type="button" class="wr-check" data-action="rank-compare" aria-pressed="${compareIndex >= 0}" ${compareStyle}
+          aria-label="Show ${escapeAttr(item.dorm.name)} on the map">${compareIndex >= 0 ? '✓' : ''}</button>
         <button type="button" class="wr-row" data-action="rank-expand" aria-expanded="${open}">
-          <span class="wr-pos">${i + 1}</span>
           <span class="wr-main">
-            <span class="wr-name" translate="no">${escapeHtml(item.dorm.name)}</span>
+            <span class="wr-name" translate="no"><span class="wr-pos">${i + 1}.</span> ${escapeHtml(item.dorm.name)}</span>
             <span class="wr-bar" aria-hidden="true"><span style="width:${Math.max(6, trip / most * 100)}%"></span></span>
           </span>
           <span class="wr-num"><strong>${trip}</strong> min<span class="wr-diff">${diff}</span></span>
@@ -861,8 +941,8 @@ function showWeekRanking(ranked) {
   }
   document.getElementById('results').innerHTML = html;
 
-  // 地图：最近的 3 个宿舍标上 ①②③（map.js）
-  showDormRankBadges(ranked.slice(0, 3).map(function (item) { return item.dorm; }));
+  // 地图：勾选的宿舍连到你的课（map.js）
+  drawWeekCompare(ranked, false);
 }
 
 // 排名下拉框：有能用的课时，最上面多一个"我的整周课表"；第一次有课时自动选上它
@@ -897,7 +977,7 @@ function updateRanking(dorms, buildings) {
     showWeekRanking(rankDormsByWeek(dorms, weekRankClasses()));
     return;
   }
-  clearDormRankBadges(); // 按某一栋楼排名：不显示整周排名的 ①②③
+  clearDormCompare(); // 按某一栋楼排名：不显示整周排名的比较
   pinPlace('rank', buildingId); // 排名选的那栋楼一定显示在地图上
 
   if (buildingId === '') {
@@ -1097,6 +1177,14 @@ async function main() {
 
   // 点击排名里的宿舍：显示详情 + 地图飞过去
   // 监听挂在外层 #results 上，因为里面的列表每次排名都会重新生成
+  // 地图上画不画沿街道的路线
+  document.getElementById('results').addEventListener('change', function (event) {
+    if (event.target.id === 'wr-routes') {
+      weekShowRoutes = event.target.checked;
+      drawWeekCompare(lastWeekRanked, false);
+    }
+  });
+
   document.getElementById('results').addEventListener('click', function (event) {
     // event.target 是实际被点到的元素（可能是名字、距离文字……）
     // closest 从它开始往外找，找到最近的 .rank-item，也就是整个这一项
@@ -1113,8 +1201,20 @@ async function main() {
     // 整周排名：点一行展开 / 收起每天的明细；明细里的链接才去看宿舍详情
     // 整周排名：结论卡片里的"在地图上看前 3 名"、"显示全部宿舍"
     if (event.target.closest('[data-action="rank-map"]')) {
-      showDormRankOnMap(rankDormsByWeek(data.dorms, weekRankClasses()).slice(0, 3).map(function (item) { return item.dorm; }),
-        weekRankClasses().map(function (c) { return c.place; }));
+      drawWeekCompare(lastWeekRanked, true);
+      return;
+    }
+    // 勾选 / 取消一个宿舍在地图上比较；最多 3 个，满了再勾就换掉最后勾的那个（最先勾的一般是最近的宿舍，留着当参照）
+    const compareButton = event.target.closest('[data-action="rank-compare"]');
+    if (compareButton) {
+      const id = compareButton.closest('.week-rank-item').dataset.dormId;
+      if (weekCompareIds.includes(id)) {
+        weekCompareIds = weekCompareIds.filter(function (x) { return x !== id; });
+      } else {
+        weekCompareIds = addCompare(weekCompareIds, id);
+      }
+      showWeekRanking(lastWeekRanked);
+      drawWeekCompare(lastWeekRanked, true);
       return;
     }
     if (event.target.closest('[data-action="rank-more"]')) {
@@ -1124,9 +1224,18 @@ async function main() {
     }
     const weekItem = event.target.closest('.week-rank-item');
     if (weekItem) {
+      // 点一行：展开每天的明细，同时在地图上显示这个宿舍和它连到的课
       if (event.target.closest('[data-action="rank-expand"]')) {
-        weekRankOpenId = weekRankOpenId === weekItem.dataset.dormId ? null : weekItem.dataset.dormId;
-        showWeekRanking(rankDormsByWeek(data.dorms, weekRankClasses()));
+        const id = weekItem.dataset.dormId;
+        weekRankOpenId = weekRankOpenId === id ? null : id;
+        if (weekRankOpenId && !weekCompareIds.includes(id)) {
+          weekCompareIds = addCompare(weekCompareIds, id);
+        }
+        showWeekRanking(lastWeekRanked);
+        if (weekRankOpenId) {
+          const entry = compareEntries(lastWeekRanked).find(function (e) { return e.dorm.id === id; });
+          fitDormCompare(entry ? [entry] : []);
+        }
         return;
       }
       if (!event.target.closest('[data-action="rank-dorm-info"]')) {
