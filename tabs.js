@@ -12,6 +12,10 @@ function showTab(name) {
     document.getElementById('tab-' + tab).hidden = !selected;
     document.getElementById('tab-btn-' + tab).setAttribute('aria-selected', String(selected));
   });
+  // 整周宿舍排名在地图上的 ①②③（map.js）：只在 Find a dorm 页显示
+  if (typeof setDormRankBadgesVisible === 'function') {
+    setDormRankBadgesVisible(name === 'dorm');
+  }
   // 我现在的位置（app.js）：只在 Directions 里跟踪；离开就停，回来再继续
   if (typeof stopLocationWatch === 'function') {
     if (name === 'route') {

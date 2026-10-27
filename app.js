@@ -764,14 +764,37 @@ function rankDormsByWeek(dorms, classes) {
 
 // 整周排名里点开了哪个宿舍（看每天的明细）；一次只开一个
 let weekRankOpenId = null;
+// 整周排名是不是展开了全部宿舍（默认只看前 5 个）
+let weekRankShowAll = false;
+const WEEK_RANK_TOP = 5;
 
 // 一个地点在明细里的写法：楼宇代码（"CAS"），没有代码时用名字
 function shortPlace(place) {
   return place.code || place.name;
 }
 
-// 整周排名：每个宿舍一行 = 名字 + 横条 + 大数字；点开看每天怎么算的
-// 横条长短 = 一周走多少分钟（最远的那个是满格），一眼就能比较；第 2 名以后写比第一名多几分钟
+// 平均一趟走几分钟：一周的总数 ÷ 来回的趟数（每个上课日 2 趟）
+// 人想"近不近"时想的是"走 3 分钟"，不是"每周 20 分钟"
+function minutesPerTrip(item) {
+  return item.days > 0 ? Math.max(1, Math.round(item.minutes / (item.days * 2))) : 0;
+}
+
+// 用文字分档（不用绿 / 黄 / 红：那三种颜色在网站里只表示"课间来不来得及"）
+function walkTier(minutes) {
+  if (minutes <= 5) {
+    return 'Very close';
+  }
+  if (minutes <= 10) {
+    return 'Close';
+  }
+  return minutes <= 15 ? 'A walk' : 'Far';
+}
+
+// 整周排名：
+//   最上面一张结论卡片：离你的课最近的宿舍，平均一趟走几分钟
+//   下面前 5 名：名字 + 横条 + "3 min"（平均一趟），第 2 名以后写每趟多走几分钟；其余收起
+//   地图上用 ①②③ 标出最近的 3 个宿舍
+//   点一行展开每天的明细，看得懂数字是怎么来的
 function showWeekRanking(ranked) {
   // 有的课还没教室（或时间）：排名只算了一部分，要说出来，不然看起来像完整的结果
   const courseKey = function (c) { return (c.course || c.title).toUpperCase(); };
@@ -781,16 +804,30 @@ function showWeekRanking(ranked) {
     ? `<div class="rank-partial"><span>Based on ${used.size} of ${all.size} courses. Add the rest for a fair ranking.</span>
         <button type="button" class="small-button" data-action="rank-rooms">Add rooms</button></div>`
     : '';
-  const best = ranked.length > 0 ? ranked[0].minutes : 0;
-  const most = ranked.length > 0 ? Math.max(ranked[ranked.length - 1].minutes, 1) : 1;
+  if (ranked.length === 0) {
+    document.getElementById('results').innerHTML = partial;
+    return;
+  }
+
+  const best = ranked[0];
+  const bestTrip = minutesPerTrip(best);
+  const shown = weekRankShowAll ? ranked : ranked.slice(0, WEEK_RANK_TOP);
+  // 横条按"显示出来的这几个"里最远的来画：前几名之间的差别才看得出来
+  const most = Math.max.apply(null, shown.map(minutesPerTrip).concat([1]));
 
   let html = `${partial}
-    <p class="week-rank-title">Walking per week, from each dorm</p>
-    <p class="week-rank-how">Dorm → first class, last class → dorm, on each class day.</p>
+    <div class="rank-hero">
+      <p class="rank-hero-label">Closest to your classes</p>
+      <p class="rank-hero-name" translate="no">${escapeHtml(best.dorm.name)}</p>
+      <p class="rank-hero-time">about <strong>${bestTrip} min</strong> walk to class · ${walkTier(bestTrip)}</p>
+      <button type="button" class="small-button" data-action="rank-map">Show top 3 on map</button>
+    </div>
+    <p class="week-rank-how">Average walk from the dorm to your first class and back from your last, on your ${best.days} class ${best.days === 1 ? 'day' : 'days'}.</p>
     <ol class="week-rank">`;
-  ranked.forEach(function (item, i) {
+  shown.forEach(function (item, i) {
     const open = weekRankOpenId === item.dorm.id;
-    const diff = i === 0 ? 'Shortest' : `+${item.minutes - best} min`;
+    const trip = minutesPerTrip(item);
+    const diff = i === 0 ? 'Closest' : (trip - bestTrip > 0 ? `+${trip - bestTrip} min` : 'Same');
     const detail = open ? `
       <div class="wr-detail">
         <table class="wr-days">
@@ -802,7 +839,7 @@ function showWeekRanking(ranked) {
               <td class="wr-day-total">${d.minutes} min</td></tr>`;
           }).join('')}</tbody>
         </table>
-        <p class="wr-rooms">Room types: ${escapeHtml(item.dorm.room_types.join(', '))}</p>
+        <p class="wr-rooms">About ${item.minutes} min of walking a week · Room types: ${escapeHtml(item.dorm.room_types.join(', '))}</p>
         <button type="button" class="text-link" data-action="rank-dorm-info">Dorm details & map ›</button>
       </div>` : '';
     html += `
@@ -811,15 +848,21 @@ function showWeekRanking(ranked) {
           <span class="wr-pos">${i + 1}</span>
           <span class="wr-main">
             <span class="wr-name" translate="no">${escapeHtml(item.dorm.name)}</span>
-            <span class="wr-bar" aria-hidden="true"><span style="width:${Math.max(4, item.minutes / most * 100)}%"></span></span>
+            <span class="wr-bar" aria-hidden="true"><span style="width:${Math.max(6, trip / most * 100)}%"></span></span>
           </span>
-          <span class="wr-num"><strong>${item.minutes}</strong> min/wk<span class="wr-diff">${diff}</span></span>
+          <span class="wr-num"><strong>${trip}</strong> min<span class="wr-diff">${diff}</span></span>
         </button>
         ${detail}
       </li>`;
   });
   html += '</ol>';
+  if (ranked.length > WEEK_RANK_TOP) {
+    html += `<button type="button" class="text-link wr-more" data-action="rank-more">${weekRankShowAll ? 'Show top ' + WEEK_RANK_TOP : `Show all ${ranked.length} dorms`}</button>`;
+  }
   document.getElementById('results').innerHTML = html;
+
+  // 地图：最近的 3 个宿舍标上 ①②③（map.js）
+  showDormRankBadges(ranked.slice(0, 3).map(function (item) { return item.dorm; }));
 }
 
 // 排名下拉框：有能用的课时，最上面多一个"我的整周课表"；第一次有课时自动选上它
@@ -854,6 +897,7 @@ function updateRanking(dorms, buildings) {
     showWeekRanking(rankDormsByWeek(dorms, weekRankClasses()));
     return;
   }
+  clearDormRankBadges(); // 按某一栋楼排名：不显示整周排名的 ①②③
   pinPlace('rank', buildingId); // 排名选的那栋楼一定显示在地图上
 
   if (buildingId === '') {
@@ -1067,6 +1111,17 @@ async function main() {
       return;
     }
     // 整周排名：点一行展开 / 收起每天的明细；明细里的链接才去看宿舍详情
+    // 整周排名：结论卡片里的"在地图上看前 3 名"、"显示全部宿舍"
+    if (event.target.closest('[data-action="rank-map"]')) {
+      showDormRankOnMap(rankDormsByWeek(data.dorms, weekRankClasses()).slice(0, 3).map(function (item) { return item.dorm; }),
+        weekRankClasses().map(function (c) { return c.place; }));
+      return;
+    }
+    if (event.target.closest('[data-action="rank-more"]')) {
+      weekRankShowAll = !weekRankShowAll;
+      showWeekRanking(rankDormsByWeek(data.dorms, weekRankClasses()));
+      return;
+    }
     const weekItem = event.target.closest('.week-rank-item');
     if (weekItem) {
       if (event.target.closest('[data-action="rank-expand"]')) {

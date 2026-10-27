@@ -326,6 +326,49 @@ function clearRouteEnds() {
   layoutClassLabels();
 }
 
+// ===== 整周宿舍排名：最近的 3 个宿舍标上 ①②③（app.js showWeekRanking） =====
+// 只在 Find a dorm 页显示：My week 里的 ①②③ 是"当天上课的顺序"，两种编号同时出现会搞混
+const rankBadgeLayer = L.featureGroup();
+
+function setDormRankBadgesVisible(visible) {
+  if (visible) {
+    rankBadgeLayer.addTo(map);
+  } else {
+    rankBadgeLayer.remove();
+  }
+}
+
+function showDormRankBadges(dorms) {
+  rankBadgeLayer.clearLayers();
+  setDormRankBadgesVisible(currentTab() === 'dorm');
+  dorms.forEach(function (dorm, i) {
+    L.marker([dorm.latitude, dorm.longitude], {
+      icon: L.divIcon({ className: 'rank-badge-icon', html: `<div class="rank-badge">${i + 1}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }),
+      zIndexOffset: 800,
+      keyboard: false
+    })
+      .bindTooltip(keepOriginal(escapeHtml(`${i + 1}. ${dorm.name}`)))
+      .on('click', function () {
+        showDormInfo(dorm);
+        highlightPlace(dorm);
+      })
+      .addTo(rankBadgeLayer);
+  });
+}
+
+function clearDormRankBadges() {
+  rankBadgeLayer.clearLayers();
+}
+
+// "Show top 3 on map"：地图缩放到能同时看到这 3 个宿舍和你上课的楼
+function showDormRankOnMap(dorms, classPlaces) {
+  bringMapIntoView();
+  const points = dorms.concat(classPlaces).map(function (p) { return [p.latitude, p.longitude]; });
+  if (points.length > 0) {
+    map.fitBounds(L.latLngBounds(points), { padding: [60, 60], maxZoom: 17 });
+  }
+}
+
 // 让地图平滑地飞到某个地点
 // 输入：一个地点对象（宿舍或教学楼）
 function focusPlace(place) {

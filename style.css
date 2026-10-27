@@ -4323,3 +4323,61 @@ li.walk-expanded button.walk-row.selected {
 .wr-days td {
   white-space: nowrap;
 }
+
+/* ===== 整周宿舍排名：结论卡片、前 5 名、地图上的 ①②③ ===== */
+.rank-hero {
+  margin: 4px 0 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: white;
+  box-shadow: 0 1px 3px rgba(17, 24, 39, 0.06);
+}
+
+.rank-hero-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.rank-hero-name {
+  margin: 4px 0 2px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.rank-hero-time {
+  margin: 0 0 12px;
+  color: #374151;
+  font-size: 14px;
+}
+
+.rank-hero-time strong {
+  color: var(--mine);
+}
+
+.wr-more {
+  margin: 10px 0 0;
+}
+
+.rank-badge-icon {
+  background: none;
+  border: none;
+}
+
+/* 宿舍在地图上是橙点：名次也用橙色，一看就知道说的是宿舍 */
+.rank-badge {
+  width: 22px;
+  height: 22px;
+  border: 2px solid white;
+  border-radius: 50%;
+  background: #ea580c;
+  color: white;
+  font: 700 12px/22px -apple-system, "Helvetica Neue", Arial, sans-serif;
+  text-align: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
