@@ -669,6 +669,9 @@ function renderMyClasses() {
     html += '</ul></details>';
   }
 
+  // 选了课：底部操作栏
+  html += renderBulkBar();
+
   // 识别漏掉了某节课：自己加
   if (!myClasses.selecting && drafts.length === 0) {
     html += '<p class="manual-row"><button type="button" class="link-button" data-action="add-manual">+ Add a missing class by hand</button></p>';
@@ -806,68 +809,59 @@ function compareByWeek(a, b) {
 
 // ===== 批量选择 =====
 
-// 工具条上的"移到另一份课表"：别的课表 + 新建一份（只有一份课表时，也能把一部分课拆出去）
-function renderMoveRow(none) {
-  let options = '';
-  myClasses.schedules.forEach(function (schedule) {
-    if (schedule.id !== myClasses.activeId) {
-      options += `<option value="${schedule.id}" translate="no">${escapeHtml(schedule.name)}</option>`;
-    }
-  });
-  options += `<option value="new">A new schedule (${escapeHtml(nextScheduleName())})</option>`;
-  return `<div class="select-row">
-      <label for="bulk-move" class="move-label">Move to</label>
-      <select id="bulk-move" ${none}>${options}</select>
-      <button type="button" class="small-button" data-action="bulk-move" ${none}>Move</button>
-    </div>`;
-}
-
 // 列表上方的工具条
-// 平时：只有一个 "Select" 按钮；批量选择时：显示选了几门，以及"全选、删除、设地点、完成"
+// 平时：Edit all · Select；选择模式：只有一行"Select classes · Select all · Done"
+// 操作按钮不放在这里：选了课以后才出现在底部（renderBulkBar），一门都没选时用户自然知道先选课
 function renderSelectToolbar(count) {
   if (count === 0) {
     return '';
   }
   if (!myClasses.selecting) {
-    // 改很多门：Edit all（周课表里一起改）；批量设地点、移到另一份课表、删除：Select
+    // 改很多门：Edit all（周课表里一起改）；对好几门课做同一件事：Select
     return `<div class="select-toolbar">
       <button type="button" class="text-link" data-action="edit-all">Edit all</button>
       <span class="upload-alt-dot" aria-hidden="true">·</span>
       <button type="button" class="text-link" data-action="select-start">Select</button>
     </div>`;
   }
-
   const n = myClasses.selected.size;
-  const none = n === 0 ? 'disabled' : '';
   return `<div class="select-toolbar selecting">
-    <div class="select-row">
-      <strong>${n} selected</strong>
-      <button type="button" class="link-button" data-action="select-all">${n === count ? 'Clear all' : 'Select all'}</button>
-      <button type="button" class="link-button" data-action="select-done">Done</button>
-    </div>
-    <div class="select-row">
-      <input type="search" id="bulk-location" list="place-options" placeholder="New location, e.g. CAS 211" ${none}>
-      <button type="button" class="small-button" data-action="bulk-location" disabled>Set location</button>
-    </div>
-    ${renderMoveRow(none)}
-    <button type="button" class="delete-button" data-action="bulk-delete" ${none}>
-      Remove ${n} ${n === 1 ? 'class' : 'classes'}
-    </button>
+    <span class="select-title">Select classes</span>
+    <span class="select-links">
+      <button type="button" class="text-link" data-action="select-all">${n === count ? 'Clear all' : 'Select all'}</button>
+      <span class="upload-alt-dot" aria-hidden="true">·</span>
+      <button type="button" class="text-link" data-action="select-done">Done</button>
+    </span>
   </div>`;
 }
 
-// 批量选择模式下的卡片：前面一个圈，整张卡片都可以点
+// 选了课以后，贴在底部的操作栏：几门 + 三个操作（点开再填）
+function renderBulkBar() {
+  const n = myClasses.selected.size;
+  if (!myClasses.selecting || n === 0) {
+    return '';
+  }
+  return `<div class="bulk-bar" role="toolbar" aria-label="Selected classes">
+      <span class="bulk-count">${n} selected</span>
+      <span class="bulk-actions">
+        <button type="button" class="quiet-button" data-action="bulk-room">Set room</button>
+        <button type="button" class="quiet-button" data-action="bulk-move-open">Move to…</button>
+        <button type="button" class="quiet-button bulk-remove" data-action="bulk-delete">Remove</button>
+      </span>
+    </div>`;
+}
+
+// 选择模式下的一门课：和平时一样一行（课名、楼、时间），前面一个圈；整行都可以点
 function renderSelectableCard(c) {
   const checked = myClasses.selected.has(c.id);
-  const where = c.place ? locationLabel(c.place, c.room) : 'No location yet';
   return `
-    <li class="class-card selectable ${checked ? 'selected' : ''}" data-id="${c.id}">
-      <span class="select-circle">${checked ? '✓' : ''}</span>
-      <span class="select-body">
-        <strong translate="no">${escapeHtml(c.title)}</strong>
-        ${classMetaLine(c)}<br>
-        <span class="rank-detail">${where}</span>
-      </span>
+    <li class="class-row selectable${checked ? ' selected' : ''}" data-id="${c.id}">
+      <button type="button" class="class-row-head" data-action="select-toggle" aria-pressed="${checked}">
+        <span class="select-circle">${checked ? '✓' : ''}</span>
+        <span class="class-row-title" translate="no">${escapeHtml(c.title)}</span>
+        <span class="class-row-where" translate="no">${c.place ? escapeHtml(c.place.code || c.place.name) : '—'}</span>
+        <span class="class-row-when">${escapeHtml(shortWhen(c))}</span>
+      </button>
     </li>`;
 }
 
@@ -890,7 +884,7 @@ function bulkDelete() {
 // 批量操作：把勾选的课都设成同一个地点（可以 Undo）
 function bulkSetLocation(found) {
   const ids = myClasses.selected;
-  changeWithUndo(`Moved ${ids.size} to ${found.place.name}`, function () {
+  changeWithUndo(`Set ${ids.size} ${ids.size === 1 ? 'class' : 'classes'} to ${found.place.name}${found.room ? ' ' + found.room : ''}`, function () {
     myClasses.items.forEach(function (c) {
       if (ids.has(c.id)) {
         Object.assign(c, {
@@ -909,15 +903,115 @@ function endSelecting() {
   renderMyClasses();
 }
 
-// 批量选择工具条里的"新地点"输入框：认出地点才能点 Set location，按钮上写出是哪里
-function updateBulkLocationButton() {
-  const input = document.getElementById('bulk-location');
-  const button = document.querySelector('[data-action="bulk-location"]');
-  const found = resolveLocationText(input.value, myClasses.placeIndex);
-  button.disabled = !found;
-  button.textContent = found
-    ? `Set to ${found.place.code || found.place.name}${found.room ? ' ' + found.room : ''}`
-    : 'Set location';
+// ===== 批量操作的小弹窗：Set room、Move to… =====
+// 和补教室弹窗同一种样子；点了底部操作栏的按钮才打开，只问这一件事
+
+function openBulkDialog(kind) {
+  myClasses.bulkKind = kind;
+  myClasses.bulkText = '';
+  renderBulkDialog();
+  const dialog = document.getElementById('bulk-dialog');
+  if (!dialog.open) {
+    dialog.showModal();
+  }
+  const input = dialog.querySelector('.bulk-room-input');
+  if (input) {
+    input.focus();
+  }
+}
+
+function closeBulkDialog() {
+  const dialog = document.getElementById('bulk-dialog');
+  if (dialog.open) {
+    dialog.close();
+  }
+  dialog.innerHTML = '';
+}
+
+function renderBulkDialog() {
+  const dialog = document.getElementById('bulk-dialog');
+  const n = myClasses.selected.size;
+  const what = `${n} ${n === 1 ? 'class' : 'classes'}`;
+  let title;
+  let body;
+  let foot = '';
+  if (myClasses.bulkKind === 'room') {
+    // 推测的楼：选中的几门课各自的候选，合在一起，按出现次数排
+    const counts = {};
+    myClasses.items.filter(function (c) { return myClasses.selected.has(c.id); }).forEach(function (c) {
+      (c.candidates || guessLocations(c.course, myClasses.placeIndex)).forEach(function (o) {
+        counts[o.place.id] = counts[o.place.id] || { place: o.place, n: 0 };
+        counts[o.place.id].n++;
+      });
+    });
+    const chips = Object.values(counts).sort(function (a, b) { return b.n - a.n; }).slice(0, 4).map(function (o) {
+      return `<button type="button" class="room-chip" data-action="bulk-room-chip" data-code="${escapeAttr(o.place.code || o.place.name)}" title="${escapeAttr(o.place.name)}" translate="no">${escapeHtml(o.place.code || o.place.name)}</button>`;
+    }).join('');
+    const found = resolveLocationText(myClasses.bulkText, myClasses.placeIndex);
+    title = `Set room for ${what}`;
+    body = `
+      <input type="search" class="bulk-room-input" list="place-options" value="${escapeAttr(myClasses.bulkText)}"
+        placeholder="Building or room, e.g. CAS 211, GSU" aria-label="Building or room" translate="no">
+      <p class="room-preview">${found ? '→ ' + escapeHtml(found.place.name) + (found.room ? ', room ' + escapeHtml(found.room) : '') : (myClasses.bulkText.trim() ? 'Not in our building list' : '')}</p>
+      ${chips ? `<div class="room-choices">${chips}</div>` : ''}`;
+    foot = `<button type="button" class="ghost-button" data-action="bulk-cancel">Cancel</button>
+      <button type="button" class="primary-button" data-action="bulk-room-save" ${found ? '' : 'disabled'}>Set room</button>`;
+  } else {
+    // 移到另一份课表：别的课表一个一个列出来，最后是新建一份
+    const others = myClasses.schedules.filter(function (schedule) { return schedule.id !== myClasses.activeId; });
+    title = `Move ${what} to`;
+    body = `<div class="bulk-targets">
+      ${others.map(function (schedule) {
+        return `<button type="button" class="bulk-target" data-action="bulk-move-to" data-target="${schedule.id}" translate="no">${escapeHtml(schedule.name)}</button>`;
+      }).join('')}
+      <button type="button" class="bulk-target bulk-target-new" data-action="bulk-move-to" data-target="new">+ New schedule <span class="option-note">(${escapeHtml(nextScheduleName())})</span></button>
+    </div>`;
+    foot = '<button type="button" class="ghost-button" data-action="bulk-cancel">Cancel</button>';
+  }
+  dialog.innerHTML = `
+    <div class="dlg-head">
+      <div class="dlg-title"><h2 id="bulk-dialog-title">${title}</h2></div>
+      <button type="button" class="dlg-close" data-action="bulk-cancel" aria-label="Close">×</button>
+    </div>
+    <div class="dlg-body dlg-body-single bulk-body">${body}</div>
+    <div class="dlg-foot"><div class="dlg-foot-row">${foot}</div></div>`;
+}
+
+function handleBulkDialogClick(event) {
+  const button = event.target.closest('button[data-action]');
+  if (!button) {
+    return;
+  }
+  const action = button.dataset.action;
+  if (action === 'bulk-cancel') {
+    closeBulkDialog();
+  } else if (action === 'bulk-room-chip') {
+    myClasses.bulkText = button.dataset.code;
+    renderBulkDialog();
+  } else if (action === 'bulk-room-save') {
+    const found = resolveLocationText(myClasses.bulkText, myClasses.placeIndex);
+    if (found && myClasses.selected.size > 0) {
+      closeBulkDialog();
+      bulkSetLocation(found);
+    }
+  } else if (action === 'bulk-move-to') {
+    closeBulkDialog();
+    moveSelectedTo(button.dataset.target);
+  }
+}
+
+// 地点输入框：打字时只更新"→ 认出来是哪里"和按钮能不能点，不重画（不然光标会跳）
+function handleBulkDialogInput(event) {
+  if (!event.target.classList.contains('bulk-room-input')) {
+    return;
+  }
+  myClasses.bulkText = event.target.value;
+  const found = resolveLocationText(myClasses.bulkText, myClasses.placeIndex);
+  const dialog = document.getElementById('bulk-dialog');
+  dialog.querySelector('.room-preview').textContent = found
+    ? '→ ' + found.place.name + (found.room ? ', room ' + found.room : '')
+    : (myClasses.bulkText.trim() ? 'Not in our building list' : '');
+  dialog.querySelector('[data-action="bulk-room-save"]').disabled = !found;
 }
 
 // ===== 课的详情：课名、课号、类型、星期、时间（编辑卡片和导入预览共用） =====
@@ -1405,24 +1499,22 @@ function findItem(card) {
 function handleListClick(event) {
   const button = event.target.closest('button[data-action]');
 
-  // 批量选择模式：点一张卡片（任何位置）就勾选 / 取消勾选
-  if (!button && myClasses.selecting) {
-    const card = event.target.closest('.class-card.selectable');
-    if (card) {
-      const id = Number(card.dataset.id);
-      if (myClasses.selected.has(id)) {
-        myClasses.selected.delete(id);
-      } else {
-        myClasses.selected.add(id);
-      }
-      renderMyClasses();
-    }
-    return;
-  }
   if (!button) {
     return;
   }
   const action = button.dataset.action;
+
+  // 选择模式：点一行就勾选 / 取消勾选
+  if (action === 'select-toggle') {
+    const id = Number(button.closest('[data-id]').dataset.id);
+    if (myClasses.selected.has(id)) {
+      myClasses.selected.delete(id);
+    } else {
+      myClasses.selected.add(id);
+    }
+    renderMyClasses();
+    return;
+  }
 
   // 批量选择的工具条
   if (action === 'select-start') {
@@ -1445,20 +1537,16 @@ function handleListClick(event) {
     renderMyClasses();
     return;
   }
-  if (action === 'bulk-move') {
-    moveSelectedTo(document.getElementById('bulk-move').value);
+  // 底部操作栏：Set room、Move to… 打开小弹窗；Remove 直接拿掉（有 Undo，也能在 Removed & skipped 里恢复）
+  if (action === 'bulk-room' || action === 'bulk-move-open') {
+    if (myClasses.selected.size > 0) {
+      openBulkDialog(action === 'bulk-room' ? 'room' : 'move');
+    }
     return;
   }
   if (action === 'bulk-delete') {
     if (myClasses.selected.size > 0) {
       bulkDelete();
-    }
-    return;
-  }
-  if (action === 'bulk-location') {
-    const found = resolveLocationText(document.getElementById('bulk-location').value, myClasses.placeIndex);
-    if (found && myClasses.selected.size > 0) {
-      bulkSetLocation(found);
     }
     return;
   }
@@ -1591,10 +1679,6 @@ function handleListClick(event) {
 
 // 选项变化、在"别的地方"里打字：更新确认按钮
 function handleListInput(event) {
-  if (event.target.id === 'bulk-location') {
-    updateBulkLocationButton();
-    return;
-  }
   const card = event.target.closest('.class-card.editing');
   if (!card) {
     return;
@@ -2911,6 +2995,14 @@ function initMyClasses(placeIndex) {
   const importDialog = document.getElementById('import-dialog');
   importDialog.addEventListener('click', handleImportChoiceClick);
   importDialog.addEventListener('change', handleImportChange); // 可疑行里直接改星期、时间、课名
+  // 批量操作的小弹窗（Set room、Move to…）；按 Esc 等于 Cancel
+  const bulkDialog = document.getElementById('bulk-dialog');
+  bulkDialog.addEventListener('click', handleBulkDialogClick);
+  bulkDialog.addEventListener('input', handleBulkDialogInput);
+  bulkDialog.addEventListener('cancel', function (event) {
+    event.preventDefault();
+    closeBulkDialog();
+  });
   // 一次补完教室的弹窗；按 Esc 等于 Cancel
   const roomsDialog = document.getElementById('rooms-dialog');
   roomsDialog.addEventListener('click', handleRoomsClick);

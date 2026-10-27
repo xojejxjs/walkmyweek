@@ -4025,3 +4025,137 @@ li.walk-expanded button.walk-row.selected {
 .list-head .select-toolbar .upload-alt-dot {
   margin: 0 6px;
 }
+
+/* ===== 选择模式（my-classes.js renderSelectToolbar / renderBulkBar） =====
+   顶部只有一行；选了课以后，操作栏贴在底部；每个操作点开再填 */
+.list-head .select-toolbar.selecting {
+  position: static;
+  display: flex;
+  flex-basis: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  box-sizing: border-box; /* 以前没写：100% 宽再加上内边距和边框，比侧栏宽，要往右划才看得到 */
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 13px;
+}
+
+.select-title {
+  color: var(--muted);
+}
+
+.select-links {
+  white-space: nowrap;
+}
+
+.class-row.selectable .class-row-head {
+  gap: 10px;
+}
+
+.class-row.selectable .select-circle {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  border: 2px solid #c3c8d0;
+  font-size: 11px;
+}
+
+.class-row.selectable.selected {
+  background: var(--action-bg);
+}
+
+.class-row.selectable.selected .select-circle {
+  border-color: var(--action);
+  background: var(--action);
+}
+
+.bulk-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 6;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  box-sizing: border-box;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: white;
+  box-shadow: 0 6px 20px rgba(17, 24, 39, 0.12);
+}
+
+.bulk-count {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.bulk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.bulk-remove:hover {
+  border-color: var(--late);
+  color: var(--late);
+}
+
+/* 批量操作的小弹窗 */
+.bulk-dialog {
+  width: min(460px, calc(100vw - 64px));
+}
+
+.bulk-body {
+  padding-top: 16px;
+}
+
+.bulk-body .room-preview {
+  margin: 8px 0 0;
+}
+
+.bulk-body .room-choices {
+  margin-top: 12px;
+}
+
+.bulk-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bulk-target {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bulk-target:hover {
+  border-color: var(--action);
+  background: var(--action-bg);
+}
+
+.bulk-target-new {
+  color: var(--action);
+}
+
+@media (max-width: 768px) {
+  .bulk-dialog {
+    width: 100%;
+  }
+
+  .bulk-bar {
+    bottom: 8px;
+  }
+}
